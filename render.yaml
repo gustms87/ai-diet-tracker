@@ -1,0 +1,28 @@
+# Render 블루프린트 (GitHub 저장소 연결 시 자동 인식)
+# main 브랜치에 push 할 때마다 자동으로 재배포됩니다.
+services:
+  - type: web
+    name: ai-diet-tracker
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: TZ
+        value: Asia/Seoul
+      - key: SESSION_SECRET
+        generateValue: true
+      # 아래 값들은 Render 대시보드에서 직접 입력합니다 (GitHub에 올라가지 않음)
+      - key: APP_PASSWORD
+        sync: false
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

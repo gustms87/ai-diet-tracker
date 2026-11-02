@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#10b981" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="AI 식단관리" />
+  <title>AI 스마트 식단관리표</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- 상단 헤더 -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-group" id="brandHomeBtn" title="오늘 식단으로 이동">
+        <img src="/icon.svg" alt="로고" class="brand-logo" />
+        <div>
+          <h1 class="brand-title">AI 식단관리표</h1>
+          <div class="sync-status" id="syncStatusBadge">
+            <span class="sync-dot online" id="syncDot"></span>
+            <span id="syncStatusText">실시간 동기화 중</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 데스크톱 탭 네비게이션 -->
+      <nav class="top-tabs" aria-label="화면 전환">
+        <button class="tab-btn active" data-view="daily">📅 일별 식단</button>
+        <button class="tab-btn" data-view="monthly">🗓️ 월별 캘린더</button>
+        <button class="tab-btn" data-view="yearly">📊 년도별 통계</button>
+      </nav>
+
+      <div class="header-actions">
+        <button class="icon-btn" id="openSyncGuideBtn" title="모바일 연동 및 클라우드/라즈베리파이 서버 안내">
+          <span>☁️</span>
+          <span class="btn-label">연동/서버</span>
+        </button>
+        <button class="icon-btn" id="openSettingsBtn" title="목표 칼로리 및 Gemini AI 키 설정">
+          <span>⚙️</span>
+          <span class="btn-label">설정</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 메인 컨테이너 -->
+  <main class="app-main">
+    <!-- ==================================================================== -->
+    <!-- 1. 일별 식단 보기 (Daily View)                                        -->
+    <!-- ==================================================================== -->
+    <section id="view-daily" class="view-section active">
+      <!-- 날짜 이동 바 -->
+      <div class="date-nav-bar">
+        <button class="nav-arrow-btn" id="prevDayBtn" aria-label="이전 날짜">◀</button>
+        <div class="date-picker-wrap">
+          <input type="date" id="dailyDateInput" class="date-input" />
+          <span class="date-weekday-badge" id="dailyWeekdayText">오늘</span>
+        </div>
+        <button class="nav-arrow-btn" id="nextDayBtn" aria-label="다음 날짜">▶</button>
+        <button class="today-chip-btn" id="goTodayBtn">오늘</button>
+      </div>
+
+      <!-- 상단 요약 그리드: 칼로리/영양소 카드 + 체중/음수량 카드 -->
+      <div class="daily-overview-grid">
+        <!-- 칼로리 및 탄단지 게이지 카드 -->
+        <div class="card nutrition-summary-card">
+          <div class="cal-hero-row">
+            <div class="cal-ring-wrap">
+              <svg class="cal-ring-svg" viewBox="0 0 120 120">
+                <circle class="cal-ring-bg" cx="60" cy="60" r="50"></circle>
+                <circle class="cal-ring-fill" id="calRingCircle" cx="60" cy="60" r="50" stroke-dasharray="314.16" stroke-dashoffset="314.16"></circle>
+              </svg>
+              <div class="cal-ring-center">
+                <span class="cal-percent" id="calPercentText">0%</span>
+                <span class="cal-ring-sub">달성률</span>
+              </div>
+            </div>
+
+            <div class="cal-numbers-box">
+              <div class="cal-title-row">
+                <span class="section-badge">오늘 섭취 칼로리</span>
+                <span class="cal-remain-badge" id="calRemainBadge">목표까지 2,000 kcal</span>
+              </div>
+              <div class="cal-main-num">
+                <strong id="dailyTotalCal">0</strong>
+                <span class="cal-unit">/ <span id="dailyTargetCal">2,000</span> kcal</span>
+              </div>
+              <div class="meal-slot-mini-pills">
+                <span>🌅 아침 <b id="miniBreakfastCal">0</b></span>
+                <span>☀️ 점심 <b id="miniLunchCal">0</b></span>
+                <span>🌙 저녁 <b id="miniDinnerCal">0</b></span>
+                <span>🍎 간식 <b id="miniSnackCal">0</b></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 탄수화물 / 단백질 / 지방 / 당류 프로그레스 바 -->
+          <div class="macro-bars-grid">
+            <div class="macro-item">
+              <div class="macro-label-row">
+                <span class="macro-name"><i class="dot carb"></i>탄수화물</span>
+                <span class="macro-val"><b id="dailyCarbsVal">0</b> / <span id="targetCarbsVal">250</span>g</span>
+              </div>
+              <div class="progress-track"><div class="progress-fill carb" id="carbsBar" style="width:0%"></div></div>
+            </div>
+            <div class="macro-item">
+              <div class="macro-label-row">
+                <span class="macro-name"><i class="dot protein"></i>단백질</span>
+                <span class="macro-val"><b id="dailyProteinVal">0</b> / <span id="targetProteinVal">100</span>g</span>
+              </div>
+              <div class="progress-track"><div class="progress-fill protein" id="proteinBar" style="width:0%"></div></div>
+            </div>
+            <div class="macro-item">
+              <div class="macro-label-row">
+                <span class="macro-name"><i class="dot fat"></i>지방</span>
+                <span class="macro-val"><b id="dailyFatVal">0</b> / <span id="targetFatVal">65</span>g</span>
+              </div>
+              <div class="progress-track"><div class="progress-fill fat" id="fatBar" style="width:0%"></div></div>
+            </div>
+            <div class="macro-item">
+              <div class="macro-label-row">
+                <span class="macro-name"><i class="dot sugar"></i>당류</span>
+                <span class="macro-val"><b id="dailySugarVal">0</b> / <span id="targetSugarVal">50</span>g</span>
+              </div>
+              <div class="progress-track"><div class="progress-fill sugar" id="sugarBar" style="width:0%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 체중 & 음수량(물 섭취) & 오늘의 메모 카드 -->
+        <div class="card wellness-card">
+          <!-- 음수량 기록 -->
+          <div class="wellness-block">
+            <div class="wellness-header">
+              <div>
+                <h3 class="wellness-title">💧 오늘 마신 물</h3>
+                <p class="wellness-sub" id="waterSubText">0ml / 목표 2,000ml (0컵)</p>
+              </div>
+              <div class="water-quick-btns">
+                <button class="chip-btn minus" id="waterMinusBtn" title="250ml 감소">-250ml</button>
+                <button class="chip-btn plus" id="waterPlus250Btn">+1컵(250ml)</button>
+                <button class="chip-btn plus" id="waterPlus500Btn">+500ml</button>
+              </div>
+            </div>
+            <div class="progress-track water-track">
+              <div class="progress-fill water" id="waterBar" style="width:0%"></div>
+            </div>
+          </div>
+
+          <hr class="divider" />
+
+          <!-- 체중 & 메모 기록 -->
+          <div class="wellness-block">
+            <div class="weight-memo-grid">
+              <div class="weight-box">
+                <label class="field-label" for="dailyWeightInput">⚖️ 오늘 체중 (kg)</label>
+                <div class="input-with-btn">
+                  <input type="number" step="0.1" min="20" max="250" id="dailyWeightInput" placeholder="예: 65.5" />
+                  <button class="btn-secondary small" id="saveWeightBtn">저장</button>
+                </div>
+                <span class="helper-caption" id="weightCompareText">목표 체중: 65.0kg</span>
+              </div>
+
+              <div class="memo-box">
+                <label class="field-label" for="dailyMemoInput">📝 오늘 컨디션·운동 메모</label>
+                <div class="input-with-btn">
+                  <input type="text" id="dailyMemoInput" placeholder="예: 저녁 러닝 30분, 외식" />
+                  <button class="btn-secondary small" id="saveMemoBtn">저장</button>
+                </div>
+                <span class="helper-caption" id="memoSavedCaption">자동으로 클라우드에 동기화됩니다</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AI 빠른 등록 액션 배너 -->
+      <div class="ai-quick-banner">
+        <div class="ai-banner-text">
+          <strong>🤖 AI 자동 칼로리 계산기</strong>
+          <span>먹은 음식을 적거나, 음식 사진 또는 구내식당 주간 식단표 캡처를 올리면 알아서 계산합니다!</span>
+        </div>
+        <div class="ai-banner-buttons">
+          <button class="btn-primary" id="openAiTextBtn">✍️ 음식 적기</button>
+          <button class="btn-accent" id="openAiPhotoBtn">📸 음식 사진</button>
+          <button class="btn-dark" id="openAiMenuTableBtn">🗓️ 식단표 캡처</button>
+        </div>
+      </div>
+
+      <!-- 아침 / 점심 / 저녁 / 간식 4대 끼니 그리드 -->
+      <div class="meal-slots-grid" id="mealSlotsContainer">
+        <!-- JS에서 아침/점심/저녁/간식 카드를 렌더링합니다 -->
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- 2. 월별 캘린더 보기 (Monthly View)                                    -->
+    <!-- ==================================================================== -->
+    <section id="view-monthly" class="view-section">
+      <div class="date-nav-bar">
+        <button class="nav-arrow-btn" id="prevMonthBtn">◀</button>
+        <h2 class="period-title" id="monthlyTitleText">2026년 11월</h2>
+        <button class="nav-arrow-btn" id="nextMonthBtn">▶</button>
+        <button class="today-chip-btn" id="goThisMonthBtn">이번 달</button>
+      </div>
+
+      <!-- 월간 통계 KPI 요약 -->
+      <div class="kpi-grid-4">
+        <div class="kpi-card">
+          <span class="kpi-label">식단 기록 일수</span>
+          <strong class="kpi-value" id="monthLoggedDays">0일</strong>
+          <span class="kpi-sub">꾸준한 기록이 습관을 만듭니다</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">일평균 섭취 칼로리</span>
+          <strong class="kpi-value" id="monthAvgCal">0 kcal</strong>
+          <span class="kpi-sub" id="monthTargetCompareSub">목표 2,000 kcal 기준</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">목표 칼로리 달성일</span>
+          <strong class="kpi-value emerald" id="monthGoalMetDays">0일</strong>
+          <span class="kpi-sub">목표치 80%~110% 권장 구간</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">월간 체중 변화</span>
+          <strong class="kpi-value" id="monthWeightDiff">-</strong>
+          <span class="kpi-sub" id="monthWeightRangeSub">체중을 기록해보세요</span>
+        </div>
+      </div>
+
+      <!-- 캘린더 범례 -->
+      <div class="calendar-legend">
+        <span class="legend-item"><i class="cal-badge good"></i>권장 달성 (80~110%)</span>
+        <span class="legend-item"><i class="cal-badge low"></i>섭취 부족 (&lt;80%)</span>
+        <span class="legend-item"><i class="cal-badge over"></i>목표 초과 (&gt;110%)</span>
+        <span class="legend-item">날짜를 누르면 해당 일자 식단 상세로 이동합니다</span>
+      </div>
+
+      <!-- 요일 헤더 + 달력 그리드 -->
+      <div class="card calendar-card">
+        <div class="calendar-weekdays">
+          <div class="sun">일</div>
+          <div>월</div>
+          <div>화</div>
+          <div>수</div>
+          <div>목</div>
+          <div>금</div>
+          <div class="sat">토</div>
+        </div>
+        <div class="calendar-grid" id="monthlyCalendarGrid">
+          <!-- JS 렌더링 -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- 3. 년도별 통계 보기 (Yearly View)                                     -->
+    <!-- ==================================================================== -->
+    <section id="view-yearly" class="view-section">
+      <div class="date-nav-bar">
+        <button class="nav-arrow-btn" id="prevYearBtn">◀</button>
+        <h2 class="period-title" id="yearlyTitleText">2026년 연간 식단 리포트</h2>
+        <button class="nav-arrow-btn" id="nextYearBtn">▶</button>
+        <button class="today-chip-btn" id="goThisYearBtn">올해</button>
+      </div>
+
+      <div class="kpi-grid-3">
+        <div class="kpi-card">
+          <span class="kpi-label">연간 총 기록 일수</span>
+          <strong class="kpi-value" id="yearLoggedDays">0일</strong>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">연간 일평균 섭취량</span>
+          <strong class="kpi-value emerald" id="yearAvgCalories">0 kcal</strong>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-label">연간 누적 기록 칼로리</span>
+          <strong class="kpi-value" id="yearTotalCalories">0 kcal</strong>
+        </div>
+      </div>
+
+      <!-- 월별 평균 칼로리 막대 차트 -->
+      <div class="card yearly-chart-card">
+        <h3 class="card-section-title">📈 월별 일평균 섭취 칼로리 추이</h3>
+        <div class="yearly-bars-wrap" id="yearlyBarsChart">
+          <!-- JS 렌더링 -->
+        </div>
+      </div>
+
+      <!-- 1월 ~ 12월 상세 카드 그리드 -->
+      <div class="yearly-months-grid" id="yearlyMonthsGrid">
+        <!-- JS 렌더링 -->
+      </div>
+    </section>
+  </main>
+
+  <!-- 모바일 하단 고정 네비게이션 바 -->
+  <nav class="mobile-bottom-nav" aria-label="모바일 하단 메뉴">
+    <button class="mob-nav-btn active" data-view="daily">
+      <span class="mob-icon">📅</span>
+      <span>일별 식단</span>
+    </button>
+    <button class="mob-nav-btn" data-view="monthly">
+      <span class="mob-icon">🗓️</span>
+      <span>월별 달력</span>
+    </button>
+    <button class="mob-fab-btn" id="mobileQuickAddBtn" title="AI 식단 추가">
+      <span>＋</span>
+    </button>
+    <button class="mob-nav-btn" data-view="yearly">
+      <span class="mob-icon">📊</span>
+      <span>년도별</span>
+    </button>
+    <button class="mob-nav-btn" id="mobileSettingsNavBtn">
+      <span class="mob-icon">⚙️</span>
+      <span>설정/서버</span>
+    </button>
+  </nav>
+
+  <!-- ====================================================================== -->
+  <!-- 모달 1: AI 식단 등록 (텍스트 / 음식 사진 / 식단표 캡처 / 직접 입력)     -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="mealModalBackdrop">
+    <div class="modal-box large">
+      <div class="modal-header">
+        <h2 class="modal-title" id="mealModalTitle">🥗 식단 추가 및 AI 칼로리 계산</h2>
+        <button class="modal-close-btn" id="closeMealModalBtn" aria-label="닫기">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- 날짜 & 끼니 선택 -->
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="modalDateInput">날짜</label>
+            <input type="date" id="modalDateInput" />
+          </div>
+          <div class="form-group">
+            <label for="modalMealTypeSelect">식사 구분 (끼니)</label>
+            <select id="modalMealTypeSelect">
+              <option value="breakfast">🌅 아침</option>
+              <option value="lunch">☀️ 점심</option>
+              <option value="dinner">🌙 저녁</option>
+              <option value="snack">🍎 간식</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 입력 방식 선택 탭 -->
+        <div class="mode-switch-tabs">
+          <button class="mode-tab active" data-mode="text">✍️ 음식 이름 적기</button>
+          <button class="mode-tab" data-mode="photo">📸 음식 사진 캡처</button>
+          <button class="mode-tab" data-mode="menu_table">🗓️ 식단표 캡처 인식</button>
+        </div>
+
+        <!-- 이미지 업로드 영역 (photo 또는 menu_table 모드일 때 표시) -->
+        <div class="image-upload-zone hidden" id="imageUploadZone">
+          <div class="upload-actions-row">
+            <label class="upload-btn camera">
+              📷 카메라 바로 촬영
+              <input type="file" accept="image/*" capture="environment" id="cameraFileInput" hidden />
+            </label>
+            <label class="upload-btn gallery">
+              🖼️ 사진/캡처 파일 선택
+              <input type="file" accept="image/*" id="galleryFileInput" hidden />
+            </label>
+          </div>
+          <p class="upload-hint" id="uploadHintText">
+            💡 휴대폰에서는 카메라 촬영/갤러리 선택을, PC에서는 캡처 후 <b>Ctrl + V (붙여넣기)</b> 또는 이미지 드래그 앤 드롭을 바로 사용하실 수 있습니다!
+          </p>
+
+          <!-- 이미지 미리보기 -->
+          <div class="image-preview-wrap hidden" id="imagePreviewWrap">
+            <img id="imagePreviewEl" alt="업로드 미리보기" />
+            <button type="button" class="remove-img-btn" id="removeImageBtn">이미지 지우기 ✕</button>
+          </div>
+        </div>
+
+        <!-- 텍스트 입력 및 빠른 추천 영역 -->
+        <div class="form-group">
+          <label for="aiPromptInput" id="aiPromptLabel">먹은 음식 입력 (여러 개는 쉼표나 줄바꿈으로 구분)</label>
+          <div class="textarea-with-action">
+            <textarea
+              id="aiPromptInput"
+              rows="2"
+              placeholder="예: 현미밥 1공기, 돼지고기 김치찌개 1인분, 계란말이 4조각, 아이스 아메리카노 1잔"
+            ></textarea>
+            <button type="button" class="btn-ai-analyze" id="runAiAnalyzeBtn">
+              <span id="aiAnalyzeBtnIcon">✨</span>
+              <span id="aiAnalyzeBtnText">AI 칼로리 계산</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 자주 먹는 음식 & 빠른 검색 칩 -->
+        <div class="quick-food-chips-section">
+          <div class="chips-header">
+            <span>⚡ 빠른 음식 클릭 추가 (누르면 바로 아래 목록에 담깁니다)</span>
+            <input type="search" id="quickFoodSearchInput" placeholder="음식 빠른 검색 (예: 닭가슴살, 김밥, 라떼)" />
+          </div>
+          <div class="food-chips-list" id="quickFoodChipsContainer">
+            <!-- JS 렌더링 -->
+          </div>
+        </div>
+
+        <!-- AI 분석 안내 배너 -->
+        <div class="ai-result-summary hidden" id="aiResultSummaryBox">
+          <div class="ai-summary-badge" id="aiEngineBadge">Google Gemini AI</div>
+          <p id="aiSummaryText"></p>
+        </div>
+
+        <!-- 식단표 다중 끼니/날짜 일괄 등록 선택 영역 (식단표 캡처에서 여러 날짜 발견 시) -->
+        <div class="multi-slot-box hidden" id="multiSlotBox">
+          <h4>🗓️ 식단표에서 여러 끼니/날짜가 인식되었습니다! 저장할 식단을 체크하세요:</h4>
+          <div class="multi-slot-list" id="multiSlotList"></div>
+          <button type="button" class="btn-primary full-width" id="saveMultiSlotsBtn">
+            ✅ 선택한 식단표 끼니 일괄 등록하기
+          </button>
+        </div>
+
+        <!-- 등록 대기 음식 리스트 (수정 및 직접 추가 가능) -->
+        <div class="staged-items-section">
+          <div class="staged-header">
+            <h4>📋 등록할 음식 목록 (<span id="stagedCountText">0</span>개 · 총 <strong id="stagedTotalCalText">0</strong> kcal)</h4>
+            <button type="button" class="btn-outline small" id="addBlankRowBtn">+ 직접 빈 항목 추가</button>
+          </div>
+
+          <div class="staged-items-list" id="stagedItemsList">
+            <!-- JS에서 음식 행 렌더링 -->
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="cancelMealModalBtn">취소</button>
+        <button type="button" class="btn-primary" id="saveStagedMealsBtn">💾 식단표에 저장하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- 모달 2: 목표치 및 Google Gemini API 설정                               -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="settingsModalBackdrop">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 class="modal-title">⚙️ AI 엔진 및 일일 목표 설정</h2>
+        <button class="modal-close-btn" id="closeSettingsModalBtn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Gemini API 설정 -->
+        <div class="settings-section">
+          <h3>🤖 Google Gemini API 설정 (음식 사진·식단표 자동 인식)</h3>
+          <p class="helper-text">
+            Google AI Studio에서 무료로 발급받은 API 키를 입력하면 음식 사진, 구내식당 식단표 캡처, 자유로운 텍스트를 AI가 정밀 분석합니다.
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">👉 무료 Gemini API 키 발급받기 (Google AI Studio)</a>
+          </p>
+          <div class="form-group">
+            <label for="settingGeminiKey">Gemini API Key <span id="geminiKeyStatusBadge" class="status-pill">미설정</span></label>
+            <input type="password" id="settingGeminiKey" placeholder="AIzaSy... (변경 시에만 새로 입력)" autocomplete="off" />
+          </div>
+          <div class="form-group">
+            <label for="settingGeminiModel">Gemini 모델 선택</label>
+            <select id="settingGeminiModel">
+              <option value="gemini-2.5-flash">gemini-2.5-flash (권장 · 빠르고 정확한 멀티모달)</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash (안정적인 무료 티어 호환)</option>
+            </select>
+          </div>
+        </div>
+
+        <hr class="divider" />
+
+        <!-- 일일 목표 칼로리 및 영양성분 -->
+        <div class="settings-section">
+          <h3>🎯 나의 일일 목표 설정</h3>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="settingTargetCal">목표 칼로리 (kcal)</label>
+              <input type="number" id="settingTargetCal" min="500" max="10000" step="50" />
+            </div>
+            <div class="form-group">
+              <label for="settingTargetWeight">목표 체중 (kg)</label>
+              <input type="number" id="settingTargetWeight" min="20" max="250" step="0.1" />
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="settingTargetCarbs">목표 탄수화물 (g)</label>
+              <input type="number" id="settingTargetCarbs" min="10" max="1000" />
+            </div>
+            <div class="form-group">
+              <label for="settingTargetProtein">목표 단백질 (g)</label>
+              <input type="number" id="settingTargetProtein" min="10" max="500" />
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="settingTargetFat">목표 지방 (g)</label>
+              <input type="number" id="settingTargetFat" min="5" max="500" />
+            </div>
+            <div class="form-group">
+              <label for="settingTargetWater">목표 음수량 (ml)</label>
+              <input type="number" id="settingTargetWater" min="500" max="6000" step="250" />
+            </div>
+          </div>
+        </div>
+
+        <hr class="divider" />
+
+        <!-- 데이터 백업 및 복원 -->
+        <div class="settings-section">
+          <h3>📦 식단 데이터 백업 / 복원 (클라우드·라즈베리파이 이전용)</h3>
+          <div class="backup-btns-row">
+            <button type="button" class="btn-secondary" id="exportDataBtn">⬇️ 전체 데이터 JSON 백업</button>
+            <label class="btn-secondary file-label-btn">
+              ⬆️ 백업 파일 복원하기
+              <input type="file" accept=".json" id="importDataInput" hidden />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="cancelSettingsBtn">닫기</button>
+        <button type="button" class="btn-primary" id="saveSettingsBtn">💾 설정 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- 모달 3: 모바일 동기화 및 24시간 무료 클라우드 / 라즈베리파이4 구축 가이드 -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="syncGuideModalBackdrop">
+    <div class="modal-box large">
+      <div class="modal-header">
+        <h2 class="modal-title">☁️ 핸드폰·PC 실시간 동기화 & 24시간 서버 구축 안내</h2>
+        <button class="modal-close-btn" id="closeSyncGuideModalBtn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="guide-card highlight">
+          <h3>📱 지금 바로 핸드폰에서 접속해 동기화 테스트하기</h3>
+          <p>같은 공유기(Wi-Fi)에 연결된 스마트폰 브라우저에서 아래 주소로 접속하면 PC와 핸드폰이 실시간으로 자동 동기화됩니다.</p>
+          <div class="local-urls-box" id="localUrlsList">http://localhost:3000</div>
+          <p class="helper-caption">💡 아이폰(Safari)은 [공유] → <b>[홈 화면에 추가]</b>, 안드로이드(Chrome)는 메뉴 → <b>[앱 설치 / 홈 화면에 추가]</b>를 누르면 전용 앱처럼 전체화면으로 작동합니다!</p>
+        </div>
+
+        <div class="guide-grid-2">
+          <div class="guide-card">
+            <h3>🍓 옵션 A. 내 라즈베리파이 4로 24시간 무료 서버 운영</h3>
+            <ol class="guide-steps">
+              <li>이 프로젝트 폴더에 포함된 <code>docker-compose.yml</code>을 라즈베리파이4에 복사합니다.</li>
+              <li><code>docker compose up -d</code> 명령 한 줄이면 24시간 자동 재시작 서버가 켜집니다.</li>
+              <li>외부(LTE/5G)에서도 접속하려면 무료 <b>Cloudflare Tunnel (cloudflared)</b> 또는 <b>Tailscale</b>을 연결하면 공유기 포트포워딩 없이도 안전하게 HTTPS 주소로 접속됩니다.</li>
+            </ol>
+          </div>
+
+          <div class="guide-card">
+            <h3>☁️ 옵션 B. 무료 클라우드 서버로 24시간 운영</h3>
+            <ol class="guide-steps">
+              <li><b>Render / Fly.io / Koyeb / Oracle Cloud Free Tier</b> 등 무료 클라우드에 프로젝트의 <code>Dockerfile</code>을 그대로 배포할 수 있습니다.</li>
+              <li>환경변수에 <code>GEMINI_API_KEY</code>만 넣어두면 어디서든 스마트폰과 PC에서 똑같은 식단표가 실시간 동기화됩니다.</li>
+              <li>PC에서 기록하던 데이터는 [설정] → [JSON 백업]으로 내려받아 새 서버에 1초 만에 그대로 복원할 수 있습니다.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-primary" id="okSyncGuideBtn">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- 로그인 화면 (클라우드 서버에 APP_PASSWORD가 설정된 경우)               -->
+  <!-- ====================================================================== -->
+  <div class="login-overlay hidden" id="loginOverlay">
+    <form class="login-box" id="loginForm">
+      <img src="/icon.svg" alt="로고" class="login-logo" />
+      <h2>AI 식단관리표</h2>
+      <p>내 식단 기록을 보호하기 위해 비밀번호를 입력해 주세요.<br />한 번 로그인하면 이 기기에서는 1년간 유지됩니다.</p>
+      <input type="password" id="loginPasswordInput" placeholder="비밀번호" autocomplete="current-password" required />
+      <button type="submit" class="btn-primary full-width" id="loginSubmitBtn">로그인</button>
+      <span class="login-error" id="loginErrorText"></span>
+    </form>
+  </div>
+
+  <!-- 토스트 알림 -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "AI 스마트 식단관리표",
+  "short_name": "AI 식단관리",
+  "description": "텍스트·음식사진·식단표 캡처 AI 칼로리 자동 계산 및 년/월/일 식단 동기화 웹앱",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#10b981",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

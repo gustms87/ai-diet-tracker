@@ -1,0 +1,14 @@
+services:
+  diet-tracker:
+    build: .
+    container_name: ai-diet-tracker
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATA_DIR=/app/data
+      # 아래에 무료 Google Gemini API 키를 입력하거나 웹앱 화면 [⚙️ 설정]에서 직접 입력할 수 있습니다.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    volumes:
+      - ./data:/app/data
