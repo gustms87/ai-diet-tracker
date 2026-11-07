@@ -357,7 +357,7 @@ function renderDailyView() {
       : slotMeals.map(item => `
           <div class="meal-item-row">
             <div class="meal-item-left">
-              ${item.image_data ? `<img src="${item.image_data}" class="meal-thumb" alt="음식 사진" />` : ''}
+              ${item.image_data ? `<img src="${item.image_data}" class="meal-thumb" data-zoom-src="${item.image_data}" data-zoom-title="${escapeHtml(item.food_name)}" alt="음식 사진" title="클릭하면 사진을 크게 봅니다" />` : ''}
               <div class="meal-item-info">
                 <div class="meal-item-title">
                   <span>${escapeHtml(item.food_name)}</span>
@@ -371,7 +371,7 @@ function renderDailyView() {
             </div>
             <div class="meal-item-right">
               <span class="meal-item-kcal">${Math.round(item.calories)} kcal</span>
-              <button class="mini-action-btn" data-edit-id="${item.id}" title="수정">✏️</button>
+              <button class="mini-action-btn" data-edit-id="${item.id}" title="이름·사진·영양성분 수정">✏️ 수정</button>
               <button class="mini-action-btn" data-del-id="${item.id}" title="삭제">🗑️</button>
             </div>
           </div>
@@ -425,7 +425,13 @@ function renderDailyView() {
     btn.addEventListener('click', () => {
       const id = Number(btn.dataset.editId);
       const item = (state.dayData.meals || []).find(m => m.id === id);
-      if (item) openEditSingleMealPrompt(item);
+      if (item) openEditMealModal(item);
+    });
+  });
+
+  container.querySelectorAll('[data-zoom-src]').forEach(img => {
+    img.addEventListener('click', () => {
+      openPhotoViewer(img.dataset.zoomSrc, img.dataset.zoomTitle);
     });
   });
 }
@@ -439,29 +445,85 @@ function updateMacroBar(valId, targetId, barId, val, target) {
   document.getElementById(barId).style.width = `${pct}%`;
 }
 
-async function openEditSingleMealPrompt(item) {
-  const newName = prompt('음식 이름을 수정하세요:', item.food_name);
-  if (newName === null) return;
-  const newAmount = prompt('섭취 분량(예: 1인분, 반공기):', item.amount || '1인분');
-  if (newAmount === null) return;
-  const newCal = prompt('칼로리(kcal)를 입력하세요:', String(Math.round(item.calories)));
-  if (newCal === null) return;
+// ============================================================================
+// 음식 이름·사진·영양성분 상세 수정 모달 및 사진 확대 뷰어
+// ============================================================================
+let editingMealImageBase64 = null;
 
-  const calRatio = (Number(newCal) || 0) / Math.max(1, Number(item.calories) || 1);
-  await fetch(`/api/meals/${item.id}`, {
+function openPhotoViewer(src, caption = '') {
+  if (!src) return;
+  document.getElementById('photoViewerImg').src = src;
+  document.getElementById('photoViewerCaption').textContent = caption || '';
+  document.getElementById('photoViewerBackdrop').classList.remove('hidden');
+}
+
+function openEditMealModal(item) {
+  document.getElementById('editMealId').value = item.id;
+  document.getElementById('editMealDate').value = item.date || state.selectedDate;
+  document.getElementById('editMealType').value = item.meal_type || 'lunch';
+  document.getElementById('editFoodName').value = item.food_name || '';
+  document.getElementById('editFoodAmount').value = item.amount || '1인분';
+  document.getElementById('editCalories').value = Math.round(Number(item.calories) || 0);
+  document.getElementById('editCarbs').value = Number(item.carbs) || 0;
+  document.getElementById('editProtein').value = Number(item.protein) || 0;
+  document.getElementById('editFat').value = Number(item.fat) || 0;
+  document.getElementById('editSugar').value = Number(item.sugar) || 0;
+  document.getElementById('editAlsoUpdateFavCheck').checked = false;
+
+  editingMealImageBase64 = item.image_data || null;
+  renderEditModalPhotoPreview();
+
+  document.getElementById('editMealModalBackdrop').classList.remove('hidden');
+}
+
+function renderEditModalPhotoPreview() {
+  const imgEl = document.getElementById('editPhotoPreviewEl');
+  const emptyEl = document.getElementById('editPhotoEmptyText');
+  if (editingMealImageBase64) {
+    imgEl.src = editingMealImageBase64;
+    imgEl.classList.remove('hidden');
+    emptyEl.classList.add('hidden');
+  } else {
+    imgEl.src = '';
+    imgEl.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+  }
+}
+
+async function saveEditedMeal() {
+  const id = Number(document.getElementById('editMealId').value);
+  if (!id) return;
+
+  const payload = {
+    date: document.getElementById('editMealDate').value || state.selectedDate,
+    meal_type: document.getElementById('editMealType').value || 'lunch',
+    food_name: document.getElementById('editFoodName').value.trim() || '음식',
+    amount: document.getElementById('editFoodAmount').value.trim() || '1인분',
+    calories: Math.max(0, Number(document.getElementById('editCalories').value) || 0),
+    carbs: Math.max(0, Number(document.getElementById('editCarbs').value) || 0),
+    protein: Math.max(0, Number(document.getElementById('editProtein').value) || 0),
+    fat: Math.max(0, Number(document.getElementById('editFat').value) || 0),
+    sugar: Math.max(0, Number(document.getElementById('editSugar').value) || 0),
+    image_data: editingMealImageBase64
+  };
+
+  await fetch(`/api/meals/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      food_name: newName,
-      amount: newAmount,
-      calories: Number(newCal) || 0,
-      carbs: Math.round((item.carbs * calRatio) * 10) / 10,
-      protein: Math.round((item.protein * calRatio) * 10) / 10,
-      fat: Math.round((item.fat * calRatio) * 10) / 10
-    })
+    body: JSON.stringify(payload)
   });
-  showToast('식단 정보가 수정되었습니다.');
-  await loadDailyData(state.selectedDate);
+
+  if (document.getElementById('editAlsoUpdateFavCheck').checked) {
+    await fetch('/api/my-foods', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: [payload] })
+    });
+  }
+
+  document.getElementById('editMealModalBackdrop').classList.add('hidden');
+  showToast('음식 정보 및 영양성분이 수정되었습니다!');
+  await refreshCurrentView();
 }
 
 // ============================================================================
@@ -767,7 +829,7 @@ function captureLivePhoto() {
   const img = new Image();
   img.onload = () => {
     state.uploadedImageBase64 = resizeImageToDataUrl(img, 1600, 0.92);
-    state.uploadedThumbBase64 = resizeImageToDataUrl(img, 140, 0.75);
+    state.uploadedThumbBase64 = resizeImageToDataUrl(img, 360, 0.82);
     state.uploadedMimeType = 'image/jpeg';
 
     stopLiveCamera();
@@ -792,7 +854,7 @@ function clearUploadedImage() {
   document.getElementById('galleryFileInput').value = '';
 }
 
-// 이미지 압축 (OCR/분석용 1600px 고화질 & DB 썸네일용 140px)
+// 이미지 압축 (OCR/분석용 1600px 고화질 & DB 사진용 360px 선명한 썸네일)
 function processImageFile(file, autoAnalyzeIfKey = true) {
   if (!file || !file.type.startsWith('image/')) return;
   stopLiveCamera();
@@ -801,7 +863,7 @@ function processImageFile(file, autoAnalyzeIfKey = true) {
     const img = new Image();
     img.onload = () => {
       state.uploadedImageBase64 = resizeImageToDataUrl(img, 1600, 0.92);
-      state.uploadedThumbBase64 = resizeImageToDataUrl(img, 140, 0.75);
+      state.uploadedThumbBase64 = resizeImageToDataUrl(img, 360, 0.82);
       state.uploadedMimeType = 'image/jpeg';
 
       const previewEl = document.getElementById('imagePreviewEl');
@@ -897,7 +959,7 @@ async function runAiAnalyze() {
       multiBox.classList.add('hidden');
     }
 
-    // 추출된 음식 항목을 등록 대기 목록에 추가
+    // 추출된 음식 항목을 등록 대기 목록에 추가 (촬영/업로드한 사진 함께 포함!)
     const newItems = (data.items || []).map(it => ({
       food_name: it.food_name || '음식',
       amount: it.amount || '1인분',
@@ -906,6 +968,7 @@ async function runAiAnalyze() {
       protein: Math.round((Number(it.protein) || 0) * 10) / 10,
       fat: Math.round((Number(it.fat) || 0) * 10) / 10,
       sugar: Math.round((Number(it.sugar) || 0) * 10) / 10,
+      image_data: it.image_data || state.uploadedThumbBase64 || null,
       ai_note: it.ai_note || ''
     }));
 
@@ -993,35 +1056,57 @@ function renderStagedItems() {
     return;
   }
 
-  listEl.innerHTML = state.stagedItems.map((it, idx) => `
-    <div class="staged-row" data-idx="${idx}">
-      <div class="staged-field">
-        <span>음식명</span>
-        <input type="text" data-field="food_name" value="${escapeHtml(it.food_name)}" />
+  listEl.innerHTML = state.stagedItems.map((it, idx) => {
+    const thumbSrc = it.image_data || state.uploadedThumbBase64 || '';
+    const thumbHtml = thumbSrc
+      ? `<img src="${thumbSrc}" alt="사진" title="클릭하면 사진을 크게 봅니다" />`
+      : `<span title="사진 없음">🍽️</span>`;
+    return `
+      <div class="staged-row" data-idx="${idx}">
+        <div class="staged-thumb-wrap" data-staged-zoom="${idx}">
+          ${thumbHtml}
+        </div>
+        <div class="staged-field">
+          <span>음식명</span>
+          <input type="text" data-field="food_name" value="${escapeHtml(it.food_name)}" />
+        </div>
+        <div class="staged-field">
+          <span>섭취량</span>
+          <input type="text" data-field="amount" value="${escapeHtml(it.amount)}" />
+        </div>
+        <div class="staged-field">
+          <span>칼로리(kcal)</span>
+          <input type="number" data-field="calories" value="${Math.round(it.calories)}" />
+        </div>
+        <div class="staged-field">
+          <span>탄수(g)</span>
+          <input type="number" step="0.1" data-field="carbs" value="${it.carbs}" />
+        </div>
+        <div class="staged-field">
+          <span>단백(g)</span>
+          <input type="number" step="0.1" data-field="protein" value="${it.protein}" />
+        </div>
+        <div class="staged-field">
+          <span>지방(g)</span>
+          <input type="number" step="0.1" data-field="fat" value="${it.fat}" />
+        </div>
+        <div class="staged-field">
+          <span>당류(g)</span>
+          <input type="number" step="0.1" data-field="sugar" value="${it.sugar || 0}" />
+        </div>
+        <button type="button" class="mini-action-btn" data-remove-idx="${idx}" title="제거">✕</button>
       </div>
-      <div class="staged-field">
-        <span>섭취량</span>
-        <input type="text" data-field="amount" value="${escapeHtml(it.amount)}" />
-      </div>
-      <div class="staged-field">
-        <span>칼로리(kcal)</span>
-        <input type="number" data-field="calories" value="${Math.round(it.calories)}" />
-      </div>
-      <div class="staged-field">
-        <span>탄수(g)</span>
-        <input type="number" step="0.1" data-field="carbs" value="${it.carbs}" />
-      </div>
-      <div class="staged-field">
-        <span>단백(g)</span>
-        <input type="number" step="0.1" data-field="protein" value="${it.protein}" />
-      </div>
-      <div class="staged-field">
-        <span>지방(g)</span>
-        <input type="number" step="0.1" data-field="fat" value="${it.fat}" />
-      </div>
-      <button type="button" class="mini-action-btn" data-remove-idx="${idx}" title="제거">✕</button>
-    </div>
-  `).join('');
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('[data-staged-zoom]').forEach(box => {
+    box.addEventListener('click', () => {
+      const idx = Number(box.dataset.stagedZoom);
+      const it = state.stagedItems[idx];
+      const src = it?.image_data || state.uploadedImageBase64 || state.uploadedThumbBase64;
+      if (src) openPhotoViewer(src, it?.food_name || '촬영한 사진');
+    });
+  });
 
   listEl.querySelectorAll('.staged-row').forEach(row => {
     const idx = Number(row.dataset.idx);
@@ -1051,12 +1136,14 @@ async function loadFoodSuggestions(query) {
     container.innerHTML = (data.suggestions || []).map((s, i) => {
       const icon = s.source === 'favorite' ? '⭐' : (s.source === 'recent' ? '🕒' : '🥗');
       const favClass = s.source === 'favorite' ? ' favorite' : '';
+      const thumbImg = s.image_data ? `<img src="${s.image_data}" class="chip-thumb" alt="" />` : `<span>${icon}</span>`;
       const delHtml = s.source === 'favorite' && s.id
         ? `<span class="fav-del-x" data-del-fav="${s.id}" title="즐겨찾기에서 삭제">×</span>`
         : '';
       return `
         <button type="button" class="food-chip${favClass}" data-sug-idx="${i}">
-          <span>${icon} ${escapeHtml(s.food_name)}</span>
+          ${thumbImg}
+          <span>${escapeHtml(s.food_name)}</span>
           <small>${Math.round(s.calories)}kcal</small>
           ${delHtml}
         </button>
@@ -1075,6 +1162,7 @@ async function loadFoodSuggestions(query) {
           protein: item.protein,
           fat: item.fat,
           sugar: item.sugar || 0,
+          image_data: item.image_data || state.uploadedThumbBase64 || null,
           ai_note: item.source === 'favorite' ? '⭐ 내 빠른 음식' : (item.source === 'recent' ? '내가 자주 먹은 메뉴' : '한국음식 영양DB')
         });
         renderStagedItems();
@@ -1342,16 +1430,64 @@ function bindEvents() {
     state.stagedItems.push({
       food_name: '',
       amount: '1인분',
-      calories: 250,
-      carbs: 30,
-      protein: 12,
-      fat: 8,
-      sugar: 2
+      calories: 0,
+      carbs: 0,
+      protein: 0,
+      fat: 0,
+      sugar: 0,
+      image_data: state.uploadedThumbBase64 || null
     });
     renderStagedItems();
   });
 
   document.getElementById('saveStagedMealsBtn').addEventListener('click', saveStagedMeals);
+
+  // 상세 수정 모달 및 사진 확대 뷰어 이벤트
+  document.getElementById('closeEditMealModalBtn').addEventListener('click', () => {
+    document.getElementById('editMealModalBackdrop').classList.add('hidden');
+  });
+  document.getElementById('cancelEditMealBtn').addEventListener('click', () => {
+    document.getElementById('editMealModalBackdrop').classList.add('hidden');
+  });
+  document.getElementById('saveEditMealBtn').addEventListener('click', saveEditedMeal);
+
+  document.getElementById('calcCalFromMacrosBtn').addEventListener('click', () => {
+    const c = Number(document.getElementById('editCarbs').value) || 0;
+    const p = Number(document.getElementById('editProtein').value) || 0;
+    const f = Number(document.getElementById('editFat').value) || 0;
+    const calc = Math.round(c * 4 + p * 4 + f * 9);
+    document.getElementById('editCalories').value = calc;
+    showToast(`탄·단·지 기준으로 ${calc} kcal가 계산되었습니다.`);
+  });
+
+  document.getElementById('editMealPhotoInput').addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        editingMealImageBase64 = resizeImageToDataUrl(img, 360, 0.82);
+        renderEditModalPhotoPreview();
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  document.getElementById('removeEditMealPhotoBtn').addEventListener('click', () => {
+    editingMealImageBase64 = null;
+    renderEditModalPhotoPreview();
+  });
+
+  document.getElementById('closePhotoViewerBtn').addEventListener('click', () => {
+    document.getElementById('photoViewerBackdrop').classList.add('hidden');
+  });
+  document.getElementById('photoViewerBackdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'photoViewerBackdrop') {
+      document.getElementById('photoViewerBackdrop').classList.add('hidden');
+    }
+  });
 
   // 설정 및 서버 연동 모달
   document.getElementById('openSettingsBtn').addEventListener('click', openSettingsModal);

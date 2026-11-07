@@ -1,8 +1,7 @@
 // ============================================================================
-// 내 PC 로컬 이미지·영양성분표·식단표 분석 엔진 (Google API 키 불필요)
-// - 카메라로 찍거나 올린 사진 속에 적힌 칼로리(kcal)와 영양성분(탄·단·지·당·중량)을
-//   최우선으로 추출하여 적용합니다.
-// - Windows 내장 신경망 한국어 OCR (Windows.Media.Ocr) + 좌표 기반 표 분석 + Tesseract 보조
+// 내 PC 로컬 이미지·영양성분표·식단표 정밀 분석 엔진 (Google API 키 불필요)
+// - Windows 신경망 한국어 OCR (정방향 + 역상 반전 + 회전 보정 + 해상도 확대)
+//   + Tesseract 한/영 듀얼 OCR 병렬 실행으로 사진 속 칼로리·영양성분 인식률 극대화
 // ============================================================================
 
 const fs = require('fs');
@@ -27,10 +26,6 @@ async function getKoreanOcrWorker() {
   return ocrWorkerPromise;
 }
 
-/**
- * Windows 10/11 내장 신경망 한국어 OCR (win-ocr.ps1) 실행
- * - 한글 포장지, 영양성분표, 식단표 인식률이 매우 높고 단어별 (x, y) 좌표를 함께 반환합니다.
- */
 function runWindowsNativeOcr(imgBuffer) {
   return new Promise((resolve) => {
     const tmpFile = path.join(os.tmpdir(), `diet_ocr_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`);
@@ -44,7 +39,7 @@ function runWindowsNativeOcr(imgBuffer) {
     execFile(
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-ImagePath', tmpFile],
-      { timeout: 8000, maxBuffer: 5 * 1024 * 1024, encoding: 'utf8' },
+      { timeout: 12000, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' },
       (err, stdout) => {
         try { fs.unlinkSync(tmpFile); } catch (_) {}
         if (err || !stdout) return resolve(null);
@@ -59,38 +54,73 @@ function runWindowsNativeOcr(imgBuffer) {
   });
 }
 
+async function runTesseractOcr(imgBuffer) {
+  try {
+    const worker = await getKoreanOcrWorker();
+    const { data } = await worker.recognize(imgBuffer);
+    return (data?.text || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
 /**
- * 한국어 OCR에서 숫자 뒤의 'g'(그램)이 '9' 또는 'q'로 인식되는 현상을 정확히 복원합니다.
- * 예: "25g" -> "259" -> 25, "1.5g" -> "1.59" -> 1.5, "0g" -> "09" -> 0, "4g" -> "4g" -> 4
+ * 숫자+단위 토큰에서 그램(g) 수치를 추출합니다.
+ * - Windows 한국어 OCR에서 'g'가 '9'로 변환된 경우(예: 25g -> 259, 1.5g -> 1.59, 0g -> 09)를
+ *   정확히 판별하여 복원합니다.
  */
-function parseGramToken(rawToken, maxVal = 300) {
+function parseGramToken(rawToken, nextToken = '', maxVal = 250) {
   if (!rawToken) return null;
   const cleaned = String(rawToken)
     .replace(/,/g, '')
-    .replace(/^\(|\)$/g, '')
+    .replace(/^[(:]+|[):]+$/g, '')
     .trim();
 
-  // % (퍼센트 기준치) 또는 mg, kcal 토큰은 제외
+  // 퍼센트(%), mg, kcal, ml 토큰은 그램(g)이 아니므로 제외
   if (/%|mg|㎎|kcal|㎉|ml|mL/i.test(cleaned)) return null;
 
-  // 1) 명시적으로 g/g/q가 붙은 경우: "25g", "1.5g", "0g"
+  // 다음 단어에 '%'가 바로 붙어 있는 경우(예: "22" + "%") 제외
+  if (/^%/.test(String(nextToken || '').trim())) return null;
+
+  // 1) 명시적으로 g/q가 붙은 경우: "25g", "1.5g", "0g"
   const explicitG = cleaned.match(/^(\d{1,3}(?:\.\d+)?)\s*[gGｇqQ]$/);
   if (explicitG) {
     const v = parseFloat(explicitG[1]);
     return v >= 0 && v <= maxVal ? Math.round(v * 10) / 10 : null;
   }
 
-  // 2) Windows 한국어 OCR에서 'g'가 '9'로 변환된 경우:
-  //    - "09" (0g), "49" (4g), "259" (25g), "709" (70g), "1.59" (1.5g), "0.69" (0.6g)
-  const trailingNine = cleaned.match(/^(\d{1,3}(?:\.\d+)?)9$/);
-  if (trailingNine) {
-    const v = parseFloat(trailingNine[1]);
-    if (v >= 0 && v <= maxVal) {
-      return Math.round(v * 10) / 10;
+  // 2) 다음 단어가 단독 'g'인 경우 (예: "70" + "g") -> 숫자 그대로 반환 ('9'를 자르지 않음!)
+  if (/^[gGｇqQ]\b/.test(String(nextToken || '').trim())) {
+    const numMatch = cleaned.match(/^(\d{1,3}(?:\.\d+)?)$/);
+    if (numMatch) {
+      const v = parseFloat(numMatch[1]);
+      return v >= 0 && v <= maxVal ? Math.round(v * 10) / 10 : null;
     }
   }
 
-  // 3) 단위 없이 숫자만 있는 표 셀 (예: "24", "1.5", "0")
+  // 3) 소수점 둘째 자리가 9로 끝나는 경우 (예: "1.59" = 1.5g, "0.69" = 0.6g, "2.19" = 2.1g)
+  //    한국 영양성분표의 g 단위는 소수점 첫째 자리까지만 표기되므로 100% 끝의 9는 'g'입니다.
+  const decimalNine = cleaned.match(/^(\d{1,3}\.\d)9$/);
+  if (decimalNine) {
+    const v = parseFloat(decimalNine[1]);
+    return v >= 0 && v <= maxVal ? Math.round(v * 10) / 10 : null;
+  }
+
+  // 4) "09" (0g) 또는 3자리 이상인데 9로 끝나는 경우 (예: "259" = 25g, "709" = 70g)
+  if (cleaned === '09') return 0;
+  const threeDigitNine = cleaned.match(/^(\d{2,3})9$/);
+  if (threeDigitNine) {
+    const v = parseFloat(threeDigitNine[1]);
+    return v >= 0 && v <= maxVal ? v : null;
+  }
+
+  // 5) 2자리이고 9로 끝나는 경우 (예: "49" = 4g, "69" = 6g, "99" = 9g)
+  const twoDigitNine = cleaned.match(/^(\d)9$/);
+  if (twoDigitNine) {
+    return parseFloat(twoDigitNine[1]);
+  }
+
+  // 6) 순수 숫자 (예: "24", "1.5", "0")
   const pureNum = cleaned.match(/^(\d{1,3}(?:\.\d+)?)$/);
   if (pureNum) {
     const v = parseFloat(pureNum[1]);
@@ -103,123 +133,154 @@ function parseGramToken(rawToken, maxVal = 300) {
 }
 
 /**
- * 사진 속 OCR 결과(줄/단어 좌표 및 전체 텍스트)에서
- * 칼로리(kcal), 탄수화물(g), 단백질(g), 지방(g), 당류(g), 총 내용량(g/ml)을 최우선 추출합니다.
+ * OCR 결과(Windows OCR + Tesseract OCR)에서 칼로리 및 영양성분을 최우선 추출합니다.
  */
 function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
   const winText = winOcrData?.fullText || '';
   const combinedText = `${winText}\n${tesseractText || ''}`;
   const lines = Array.isArray(winOcrData?.lines) ? winOcrData.lines : [];
 
-  // "2,000 kcal 기준" 안내 문구 제거 (기준치 2000kcal를 식품 칼로리로 오인하는 것 방지)
+  // "2,000 kcal 기준" 문구만 안전하게 제거 (실제 열량이 같은 줄에 있어도 보존되도록 정확히 해당 구문만 치환)
   const textWithout2000Ref = combinedText
     .replace(/,/g, '')
-    .replace(/2000\s*(?:kcal|㎉|칼로리)\s*기준/gi, ' ')
-    .replace(/기준치[^\n]{0,25}2000\s*(?:kcal|㎉)/gi, ' ');
+    .replace(/2\s*0\s*0\s*0\s*(?:kcal|㎉|kca1|kcaI|칼로리)\s*기\s*준/gi, ' ')
+    .replace(/기준치[가-힣\s()*%0-9]{0,20}2000\s*(?:kcal|㎉)/gi, ' ');
 
   // --------------------------------------------------------------------------
   // 1. 칼로리(kcal / 열량) 추출
   // --------------------------------------------------------------------------
   let calories = null;
+  const calCandidates = [];
+
   const calRegexes = [
-    /(\d{1,4}(?:\.\d+)?)\s*(?:kcal|㎉|kca1|kcaI|KCAL|칼로리)/gi,
+    /(\d{1,4}(?:\.\d+)?)\s*(?:kcal|㎉|kca1|kcaI|kcai|KCAL|칼로리)/gi,
     /열\s*량\s*[:.]?\s*(\d{1,4}(?:\.\d+)?)/gi,
     /칼\s*로\s*리\s*[:.]?\s*(\d{1,4}(?:\.\d+)?)/gi
   ];
+
   for (const rx of calRegexes) {
     const matches = [...textWithout2000Ref.matchAll(rx)];
     for (const m of matches) {
       const val = parseFloat(m[1]);
-      if (val >= 5 && val !== 2000 && val <= 3500) {
-        calories = Math.round(val);
-        break;
+      if (val >= 5 && val !== 2000 && val <= 3000) {
+        calCandidates.push(Math.round(val));
       }
     }
-    if (calories !== null) break;
+  }
+  if (calCandidates.length > 0) {
+    calories = calCandidates[0];
   }
 
   // --------------------------------------------------------------------------
-  // 2. 단어 좌표(X, Y) 및 줄 단위 기반으로 영양성분(탄수화물/단백질/지방/당류) 정밀 추출
+  // 2. 영양성분(탄수화물/단백질/지방/당류) 추출
+  //    - 단어가 붙어있는 경우("탄수화물70g", "탄수화물709")도 처리
+  //    - %가 앞에 오든 뒤에 오든("탄수화물 22% 70g", "탄수화물 70g 22%") 처리
+  //    - 가로형 표(윗줄 헤더, 아랫줄 수치)도 X 좌표로 매칭
   // --------------------------------------------------------------------------
   function findNutrientByKeyword(keywordRegex, excludeRegex = null, maxVal = 250) {
-    // (A) Windows OCR 줄/단어 배열에서 탐색 (가로형 표 + 세로형 표 모두 대응)
+    // (A) 먼저 Tesseract 텍스트(영어 'g' 인식 정확도 높음)에서 명시적 '<숫자>g' 탐색
+    let tessTarget = (tesseractText || '').replace(/,/g, '');
+    if (excludeRegex) {
+      tessTarget = tessTarget.replace(new RegExp(excludeRegex.source + '[^\\n]{0,18}', 'gi'), ' ');
+    }
+    const explicitTessRx = new RegExp(
+      keywordRegex.source + '[^\\d\\n]{0,15}(?:\\d{1,3}\\s*%\\s*)?(\\d{1,3}(?:\\.\\d+)?)\\s*[gGｇ]',
+      'i'
+    );
+    const tessMatch = tessTarget.match(explicitTessRx);
+    if (tessMatch && tessMatch[1] !== undefined) {
+      const v = parseFloat(tessMatch[1]);
+      if (!isNaN(v) && v >= 0 && v <= maxVal) {
+        return Math.round(v * 10) / 10;
+      }
+    }
+
+    // (B) Windows 신경망 OCR 줄/단어 좌표 탐색
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
       const words = line.words || [];
 
       for (let wi = 0; wi < words.length; wi++) {
         const wText = words[wi].text || '';
-        // 두 단어로 갈라진 경우(예: "탄수" + "화물")까지 합쳐서 확인
         const twoWord = wi + 1 < words.length ? wText + words[wi + 1].text : wText;
 
         const matchedSingle = keywordRegex.test(wText) && (!excludeRegex || !excludeRegex.test(wText));
         const matchedTwo = !matchedSingle && keywordRegex.test(twoWord) && (!excludeRegex || !excludeRegex.test(twoWord));
 
         if (matchedSingle || matchedTwo) {
-          const startIdx = matchedTwo ? wi + 2 : wi + 1;
           const kwX = words[wi].x;
 
-          // 1) 같은 줄의 오른쪽 단어들에서 첫 번째 유효한 g 수치 찾기 (예: "탄수화물 49 (1%)" 또는 "탄수화물 1% 49")
-          for (let k = startIdx; k < Math.min(words.length, startIdx + 4); k++) {
+          // 0) 만약 키워드 단어 자체에 숫자가 붙어있는 경우 (예: "탄수화물70g", "탄수화물709", "단백질24g")
+          const targetWord = matchedTwo ? twoWord : wText;
+          const restInWord = targetWord.replace(keywordRegex, '').replace(/^[:.\s]+/, '');
+          if (/\d/.test(restInWord)) {
+            const nextW = words[matchedTwo ? wi + 2 : wi + 1]?.text || '';
+            const inWordVal = parseGramToken(restInWord, nextW, maxVal);
+            if (inWordVal !== null) return inWordVal;
+          }
+
+          // 1) 같은 줄의 오른쪽 단어들에서 찾기
+          const startIdx = matchedTwo ? wi + 2 : wi + 1;
+          for (let k = startIdx; k < Math.min(words.length, startIdx + 5); k++) {
             const candidate = words[k].text;
-            // 다른 영양소 이름이 나오면 중단
-            if (/탄수|단백|지방|당류|나트륨|콜레스|열량/.test(candidate)) break;
-            const parsed = parseGramToken(candidate, maxVal);
+            const nextToken = words[k + 1]?.text || '';
+            if (/탄수|단백|지방|당류|나트륨|콜레스|열량|칼로리/.test(candidate)) break;
+            const parsed = parseGramToken(candidate, nextToken, maxVal);
             if (parsed !== null) return parsed;
           }
 
-          // 2) 가로 방향 표(헤더 아랫줄에 수치가 있는 표)인 경우: 바로 다음 줄에서 X 좌표가 비슷한 단어 찾기
+          // 2) 가로 방향 표(헤더 바로 아랫줄 같은 X 좌표에 수치가 있는 표)
           if (li + 1 < lines.length) {
             const nextWords = lines[li + 1].words || [];
-            let bestWord = null;
+            let bestVal = null;
             let bestDist = 9999;
-            for (const nw of nextWords) {
+            for (let nwIdx = 0; nwIdx < nextWords.length; nwIdx++) {
+              const nw = nextWords[nwIdx];
               const dist = Math.abs((nw.x || 0) - (kwX || 0));
-              if (dist < 100 && dist < bestDist) {
-                const parsed = parseGramToken(nw.text, maxVal);
+              if (dist < 110 && dist < bestDist) {
+                const parsed = parseGramToken(nw.text, nextWords[nwIdx + 1]?.text || '', maxVal);
                 if (parsed !== null) {
                   bestDist = dist;
-                  bestWord = parsed;
+                  bestVal = parsed;
                 }
               }
             }
-            if (bestWord !== null) return bestWord;
+            if (bestVal !== null) return bestVal;
           }
         }
       }
     }
 
-    // (B) 전체 텍스트에서 정규식으로 탐색 (줄바꿈/공백 포함)
+    // (C) 전체 합산 텍스트 정규식 탐색
     let targetText = combinedText.replace(/,/g, '');
     if (excludeRegex) {
       targetText = targetText.replace(new RegExp(excludeRegex.source + '[^\\d\\n]{0,15}\\d+(?:\\.\\d+)?[g9%]?', 'gi'), ' ');
     }
-
-    // 예: "탄수화물 70g", "탄수화물 709", "탄수화물 22% 70g"
     const pattern = new RegExp(
-      keywordRegex.source + '[^\\d\\n]{0,15}(?:\\d{1,3}%\\s*)?(\\d{1,3}(?:\\.\\d+)?[gG9qQ]?)',
+      keywordRegex.source + '[^\\d\\n]{0,15}(?:\\d{1,3}\\s*%\\s*)?(\\d{1,3}(?:\\.\\d+)?\\s*[gG9qQ]?)',
       'i'
     );
     const m = targetText.match(pattern);
     if (m && m[1]) {
-      const parsed = parseGramToken(m[1], maxVal);
+      const rawCap = m[1].trim();
+      const parts = rawCap.split(/\s+/);
+      const parsed = parseGramToken(parts[0], parts[1] || '', maxVal);
       if (parsed !== null) return parsed;
     }
 
     return null;
   }
 
-  const carbs = findNutrientByKeyword(/^(?:탄\s*수\s*화\s*물|탄수화물|Carbohydrate)/i, null, 250);
-  const protein = findNutrientByKeyword(/^(?:단\s*백\s*질|단백질|단백실|Protein)/i, null, 200);
-  const fat = findNutrientByKeyword(/^(?:지\s*방|지방|Fat)/i, /포\s*화|트\s*랜\s*스|불\s*포\s*화/i, 180);
-  const sugar = findNutrientByKeyword(/^(?:당\s*류|당류|Sugars?)/i, null, 150);
+  const carbs = findNutrientByKeyword(/(?:탄\s*수\s*화\s*[물믈]|탄수회물|Carbohydrate)/i, null, 250);
+  const protein = findNutrientByKeyword(/(?:단\s*백\s*[질실]|Protein)/i, null, 200);
+  const fat = findNutrientByKeyword(/(?:지\s*방|Fat)/i, /포\s*화|트\s*랜\s*스|불\s*포\s*화/i, 180);
+  const sugar = findNutrientByKeyword(/(?:당\s*류|Sugars?)/i, null, 150);
 
   // --------------------------------------------------------------------------
-  // 3. 총 내용량 / 중량 (g / ml) 추출 (예: "총 내용량 100g", "1009 (135 kcal)", "210g")
+  // 3. 총 내용량 / 중량 (g / ml) 추출
   // --------------------------------------------------------------------------
   let amount = null;
   const flatNoComma = combinedText.replace(/,/g, '');
-
   const weightPatterns = [
     /(?:총\s*내\s*용\s*량|내\s*용\s*량|제\s*공\s*량)[^\d\n]{0,12}(\d{2,4})\s*(?:[gG9]|ml|mL)/i,
     /(\d{2,4})\s*(?:[gG9]|ml|mL)\s*\(\s*\d{2,4}\s*(?:kcal|㎉)/i,
@@ -242,22 +303,20 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
     }
   }
 
-  // 칼로리가 안 적혀 있거나 빛에 가렸는데 탄/단/지가 읽힌 경우 4-4-9 공식으로 계산
+  // 칼로리가 안 읽혔지만 탄/단/지가 읽힌 경우 4-4-9 공식으로 자동 계산
   if (calories === null && (carbs !== null || protein !== null || fat !== null)) {
     calories = Math.round((carbs || 0) * 4 + (protein || 0) * 4 + (fat || 0) * 9);
   }
 
-  // 반대로 칼로리와 단백질(예: 앞면 포장지 "120kcal 단백질 23g")만 적혀 있고 탄/지가 없는 경우 자연스럽게 보정
   const anyMacroFound = carbs !== null || protein !== null || fat !== null || sugar !== null;
   const anyNumberFound = calories !== null || anyMacroFound;
 
   // --------------------------------------------------------------------------
-  // 4. 사진 속 텍스트에서 제품명(음식 이름) 추출
+  // 4. 사진 속 텍스트에서 제품명 추출
   // --------------------------------------------------------------------------
   let foodName = (userMemo || '').trim();
   if (!foodName && lines.length > 0) {
-    // 영양정보 표 헤더가 아닌 상단 줄에서 제품명 후보 찾기
-    const ignoreLineRx = /영양정보|영양성분|내용량|탄수화물|단백질|포화지방|트랜스지방|콜레스테롤|나트륨|기준치|kcal|%|원재료|보관방법|소비기한|유통기한/i;
+    const ignoreLineRx = /영양정보|영양성분|내용량|탄수화물|단백질|포화지방|트랜스지방|콜레스테롤|나트륨|기준치|kcal|%|원재료|보관방법|소비기한|유통기한|비율/i;
     for (const l of lines) {
       const txt = (l.text || '').trim().replace(/닭가습살/g, '닭가슴살');
       if (txt.length >= 2 && txt.length <= 28 && /[가-힣]/.test(txt) && !ignoreLineRx.test(txt)) {
@@ -278,6 +337,14 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
     }
   }
 
+  // OCR 인식 원문 요약 (사용자가 화면에서 뭐가 읽혔는지 확인할 수 있도록)
+  const cleanPreview = (winText || tesseractText || '')
+    .split(/[\r\n]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(' / ');
+
   return {
     anyNumberFound,
     calories,
@@ -287,7 +354,8 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
     sugar,
     amount: amount || '1개(1인분)',
     foodName: foodName || '스캔한 식품 (이름 확인)',
-    rawText: combinedText.trim()
+    rawText: combinedText.trim(),
+    ocrPreview: cleanPreview
   };
 }
 
@@ -345,11 +413,6 @@ function parseOcrTextToMenuItems(ocrText, userMemo = '') {
   return matchedItems;
 }
 
-/**
- * 내 PC에서 직접 이미지 분석 수행
- * - 사진 안에 칼로리(kcal)나 영양성분(탄수화물/단백질/지방/당류)이 적혀 있으면
- *   어떤 모드에서 찍었든 무조건 사진에 적힌 실제 수치를 최우선으로 적용합니다!
- */
 async function analyzeImageOnLocalPC({ mode, text, imageBase64 }) {
   const cleanBase64 = (imageBase64 || '').replace(/^data:[^;]+;base64,/, '');
   const imgBuffer = cleanBase64 ? Buffer.from(cleanBase64, 'base64') : null;
@@ -358,22 +421,15 @@ async function analyzeImageOnLocalPC({ mode, text, imageBase64 }) {
   let tesseractText = '';
 
   if (imgBuffer) {
-    // 1. Windows 내장 신경망 한국어 OCR 실행 (가장 빠르고 정확함)
-    winOcrData = await runWindowsNativeOcr(imgBuffer);
-
-    // 2. Windows OCR 결과가 비어있거나 보조가 필요할 때 Tesseract 실행
-    if (!winOcrData || !winOcrData.fullText) {
-      try {
-        const worker = await getKoreanOcrWorker();
-        const { data } = await worker.recognize(imgBuffer);
-        tesseractText = (data?.text || '').trim();
-      } catch (_) {}
-    }
+    // Windows 신경망 한국어 OCR(정방향+반전+확대)과 Tesseract(한/영)를 병렬 실행하여 인식률 극대화
+    const [winRes, tessRes] = await Promise.all([
+      runWindowsNativeOcr(imgBuffer),
+      runTesseractOcr(imgBuffer)
+    ]);
+    winOcrData = winRes;
+    tesseractText = tessRes;
   }
 
-  // --------------------------------------------------------------------------
-  // 최우선 순위: 사진 안에 적힌 칼로리(kcal) 및 영양성분(탄·단·지·당) 추출!
-  // --------------------------------------------------------------------------
   const extracted = extractNutritionFromOcrData(winOcrData, tesseractText, text);
 
   if (extracted.anyNumberFound && mode !== 'menu_table') {
@@ -391,9 +447,10 @@ async function analyzeImageOnLocalPC({ mode, text, imageBase64 }) {
     if (extracted.sugar !== null) detectedParts.push(`당류 ${s}g`);
 
     return {
-      engine: '사진 속 영양성분/칼로리 직접 추출 (내 PC 신경망 OCR)',
+      engine: '사진 속 영양성분/칼로리 직접 추출 (듀얼 신경망 OCR)',
       mode: 'nutrition_label',
-      summary: `✅ 사진에 적힌 수치(${detectedParts.join(' · ')})를 그대로 읽어서 적용했습니다! 제품명을 확인하고 저장하세요.`,
+      ocr_preview: extracted.ocrPreview,
+      summary: `✅ 사진에 적힌 수치(${detectedParts.join(' · ')})를 읽어서 적용했습니다!${extracted.ocrPreview ? `\n[읽힌 글자: ${extracted.ocrPreview}]` : ''}`,
       is_multi_slot: false,
       slots: [],
       items: [
@@ -405,15 +462,12 @@ async function analyzeImageOnLocalPC({ mode, text, imageBase64 }) {
           protein: p,
           fat: f,
           sugar: s,
-          ai_note: `사진 속 표기 수치 적용 (${detectedParts.join(', ')})`
+          ai_note: `사진 표기 수치 (${detectedParts.join(', ')})`
         }
       ]
     };
   }
 
-  // --------------------------------------------------------------------------
-  // 차순위: 식단표 캡처 또는 메뉴 이름만 적힌 이미지
-  // --------------------------------------------------------------------------
   const memoItems = text && text.trim() ? estimateFromTextFallback(text.trim()) : [];
   const ocrItems = extracted.rawText ? parseOcrTextToMenuItems(extracted.rawText, '') : [];
 
@@ -430,18 +484,19 @@ async function analyzeImageOnLocalPC({ mode, text, imageBase64 }) {
     return {
       engine: '내 PC 한글 메뉴 인식 엔진',
       mode,
-      summary: `사진에서 ${merged.length}개 메뉴 이름을 인식했습니다.`,
+      ocr_preview: extracted.ocrPreview,
+      summary: `사진에서 ${merged.length}개 메뉴 이름을 인식했습니다.${extracted.ocrPreview ? `\n[읽힌 글자: ${extracted.ocrPreview}]` : ''}`,
       is_multi_slot: false,
       slots: [],
       items: merged
     };
   }
 
-  // 사진에서 글자가 전혀 안 읽힌 경우 (초점이 흐리거나 글자가 없는 순수 음식 사진)
   return {
     engine: '사진 직접 입력 모드 (글자 미감지)',
     mode,
-    summary: '⚠️ 사진 속에서 칼로리나 성분표 글자가 선명하게 읽히지 않았습니다. 성분표 글자가 잘 보이도록 조금 더 가까이서 초점을 맞춰 다시 찍거나, 아래 칸에 수치를 직접 입력해 주세요.',
+    ocr_preview: extracted.ocrPreview,
+    summary: `⚠️ 사진에서 칼로리/성분 숫자를 명확히 읽지 못했습니다.${extracted.ocrPreview ? ` (인식된 일부 글자: ${extracted.ocrPreview})` : ''} 글자가 잘 보이게 가까이서 다시 찍거나 아래 칸에 수치를 입력해 주세요.`,
     is_multi_slot: false,
     slots: [],
     items: [
@@ -453,7 +508,7 @@ async function analyzeImageOnLocalPC({ mode, text, imageBase64 }) {
         protein: 0,
         fat: 0,
         sugar: 0,
-        ai_note: '글자가 인식되지 않아 0으로 비워두었습니다 (직접 입력 또는 재촬영)'
+        ai_note: '사진 첨부됨 (성분 수치를 입력해 주세요)'
       }
     ]
   };

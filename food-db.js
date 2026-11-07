@@ -3,8 +3,8 @@
 
 const KOREAN_FOOD_DB = [
   // 밥류 / 주식
-  { keywords: ['공기밥', '쌀밥', '흰쌀밥', '밥', '백미밥'], name: '쌀밥(백미)', unit: '1공기(210g)', calories: 310, carbs: 68, protein: 6, fat: 0.7, sugar: 0 },
-  { keywords: ['현미밥', '잡곡밥', '오곡밥', '흑미밥', '귀리밥'], name: '잡곡/현미밥', unit: '1공기(210g)', calories: 295, carbs: 63, protein: 7, fat: 1.5, sugar: 0 },
+  { keywords: ['햇반', '오뚜기밥', '즉석밥', '공기밥', '쌀밥', '흰쌀밥', '밥', '백미밥'], name: '햇반/쌀밥(백미)', unit: '1공기(210g)', calories: 315, carbs: 70, protein: 6, fat: 1.0, sugar: 0 },
+  { keywords: ['현미밥', '잡곡밥', '오곡밥', '흑미밥', '귀리밥', '현미햇반', '잡곡햇반'], name: '잡곡/현미밥', unit: '1공기(210g)', calories: 295, carbs: 63, protein: 7, fat: 1.5, sugar: 0 },
   { keywords: ['김밥', '야채김밥', '참치김밥', '김밥한줄'], name: '김밥', unit: '1줄(250g)', calories: 460, carbs: 72, protein: 14, fat: 12, sugar: 3 },
   { keywords: ['삼각김밥'], name: '삼각김밥', unit: '1개(110g)', calories: 195, carbs: 35, protein: 4.5, fat: 3.8, sugar: 1 },
   { keywords: ['비빔밥', '산채비빔밥', '돌솥비빔밥'], name: '비빔밥', unit: '1인분', calories: 580, carbs: 88, protein: 21, fat: 15, sugar: 8 },
@@ -104,8 +104,9 @@ const KOREAN_FOOD_DB = [
   { keywords: ['카페라떼', '라떼', '바닐라라떼', '카푸치노', '플랫화이트', '믹스커피'], name: '카페라떼/밀크커피', unit: '1잔(355ml)', calories: 180, carbs: 16, protein: 8, fat: 9, sugar: 14 },
   { keywords: ['제로콜라', '제로사이다', '탄산수', '제로음료'], name: '제로 탄산음료/탄산수', unit: '1캔(355ml)', calories: 0, carbs: 0, protein: 0, fat: 0, sugar: 0 },
   { keywords: ['콜라', '사이다', '환타', '탄산음료', '주스', '오렌지주스', '에이드'], name: '탄산음료/과일주스', unit: '1캔/1잔(355ml)', calories: 150, carbs: 38, protein: 0, fat: 0, sugar: 36 },
-  { keywords: ['과자', '포카칩', '새우깡', '초코파이', '쿠키', '케이크', '빵', '크로와상', '도넛', '마카롱', '아이스크림', '초콜릿'], name: '디저트/간식류', unit: '1회분', calories: 280, carbs: 36, protein: 4, fat: 14, sugar: 18 },
-  { keywords: ['소주', '맥주', '막걸리', '와인', '하이볼'], name: '주류(맥주/소주 등)', unit: '1잔/1캔', calories: 185, carbs: 14, protein: 1.5, fat: 0, sugar: 2 }
+  { keywords: ['과자', '포카칩', '새우깡', '초코파이', '쿠키', '케이크', '빵', '크로와상', '도넛', '마카롱', '아이스크림', '초콜릿'], name: '디저트/간식류', unit: '1회분(70g)', calories: 280, carbs: 36, protein: 4, fat: 14, sugar: 18 },
+  { keywords: ['하이네켄', '카스', '테라', '켈리', '아사히', '기네스', '클라우드', '생맥주', '캔맥주', '맥주'], name: '맥주', unit: '1캔(500ml)', calories: 210, carbs: 16, protein: 2, fat: 0, sugar: 0 },
+  { keywords: ['소주', '참이슬', '처음처럼', '새로', '진로', '막걸리', '와인', '하이볼', '위스키'], name: '주류(소주/와인/하이볼)', unit: '1잔/1병(360ml)', calories: 400, carbs: 4, protein: 0, fat: 0, sugar: 1 }
 ];
 
 /**
@@ -119,41 +120,8 @@ function estimateFromTextFallback(inputText) {
 
   const items = [];
   for (const part of rawParts) {
-    // 수량/배수 파싱 (예: "반공기", "0.5인분", "2개", "3조각", "두줄")
-    let multiplier = 1;
-    let amountNote = '';
-    if (/반\s*(공기|그릇|개|줄|인분|쪽)/.test(part) || /1\/2/.test(part)) {
-      multiplier = 0.5;
-      amountNote = '0.5인분(반)';
-    } else if (/두\s*(공기|그릇|개|줄|인분|잔|쪽)/.test(part)) {
-      multiplier = 2;
-      amountNote = '2개/2인분';
-    } else if (/세\s*(공기|그릇|개|줄|인분|잔|쪽)/.test(part)) {
-      multiplier = 3;
-      amountNote = '3개/3인분';
-    } else {
-      const numMatch = part.match(/(\d+(?:\.\d+)?)\s*(인분|공기|그릇|개|줄|잔|팩|봉|봉지|캔|컵|쪽|토막|조각|g|ml)/i);
-      if (numMatch) {
-        const val = parseFloat(numMatch[1]);
-        const unit = numMatch[2].toLowerCase();
-        if (unit === 'g') {
-          multiplier = Math.max(0.2, Math.min(5, val / 150));
-          amountNote = `${val}g`;
-        } else if (unit === 'ml') {
-          multiplier = Math.max(0.2, Math.min(5, val / 250));
-          amountNote = `${val}ml`;
-        } else if (unit === '조각') {
-          multiplier = Math.max(0.25, Math.min(4, val / 3));
-          amountNote = `${val}조각`;
-        } else {
-          multiplier = Math.max(0.2, Math.min(10, val));
-          amountNote = `${val}${numMatch[2]}`;
-        }
-      }
-    }
-
     const cleanedName = part
-      .replace(/(\d+(?:\.\d+)?)\s*(인분|공기|그릇|개|줄|잔|팩|봉|봉지|캔|컵|쪽|토막|조각|g|ml)/gi, '')
+      .replace(/(\d+(?:\.\d+)?)\s*(인분|공기|그릇|개|줄|잔|팩|봉|봉지|캔|컵|쪽|토막|조각|병|g|ml)/gi, '')
       .replace(/반\s*(공기|그릇|개|줄|인분|쪽)/g, '')
       .trim() || part;
 
@@ -171,7 +139,45 @@ function estimateFromTextFallback(inputText) {
       }
     }
 
+    // 수량/배수 파싱 (해당 음식의 기본 g/ml 중량 대비 정확한 비율 계산)
+    let multiplier = 1;
+    let amountNote = '';
+    if (/반\s*(공기|그릇|개|줄|인분|쪽)/.test(part) || /1\/2/.test(part)) {
+      multiplier = 0.5;
+      amountNote = '0.5인분(반)';
+    } else if (/두\s*(공기|그릇|개|줄|인분|잔|쪽)/.test(part)) {
+      multiplier = 2;
+      amountNote = '2개/2인분';
+    } else if (/세\s*(공기|그릇|개|줄|인분|잔|쪽)/.test(part)) {
+      multiplier = 3;
+      amountNote = '3개/3인분';
+    } else {
+      const numMatch = part.match(/(\d+(?:\.\d+)?)\s*(인분|공기|그릇|개|줄|잔|팩|봉|봉지|캔|컵|쪽|토막|조각|병|g|ml)/i);
+      if (numMatch) {
+        const val = parseFloat(numMatch[1]);
+        const unit = numMatch[2].toLowerCase();
+        if (unit === 'g') {
+          const baseGMatch = matched?.unit?.match(/(\d+)\s*g/i);
+          const baseG = baseGMatch ? parseFloat(baseGMatch[1]) : 150;
+          multiplier = Math.max(0.1, Math.min(8, val / baseG));
+          amountNote = `${val}g`;
+        } else if (unit === 'ml') {
+          const baseMlMatch = matched?.unit?.match(/(\d+)\s*ml/i);
+          const baseMl = baseMlMatch ? parseFloat(baseMlMatch[1]) : 355;
+          multiplier = Math.max(0.1, Math.min(8, val / baseMl));
+          amountNote = `${val}ml`;
+        } else if (unit === '조각') {
+          multiplier = Math.max(0.25, Math.min(4, val / 3));
+          amountNote = `${val}조각`;
+        } else {
+          multiplier = Math.max(0.2, Math.min(10, val));
+          amountNote = `${val}${numMatch[2]}`;
+        }
+      }
+    }
+
     if (matched) {
+      const multRounded = Math.round(multiplier * 100) / 100;
       items.push({
         food_name: cleanedName.length <= 20 ? cleanedName : matched.name,
         amount: amountNote || matched.unit,
@@ -180,7 +186,7 @@ function estimateFromTextFallback(inputText) {
         protein: Math.round(matched.protein * multiplier * 10) / 10,
         fat: Math.round(matched.fat * multiplier * 10) / 10,
         sugar: Math.round(matched.sugar * multiplier * 10) / 10,
-        ai_note: `내장 영양DB 기준 (${matched.name} ${matched.unit} × ${multiplier})`
+        ai_note: `내장 영양DB 기준 (${matched.name} ${matched.unit} × ${multRounded})`
       });
     } else {
       // 미등록 일반 음식은 기본 균형 한식 단품으로 추정

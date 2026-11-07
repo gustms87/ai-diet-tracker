@@ -608,6 +608,119 @@
   </div>
 
   <!-- ====================================================================== -->
+  <!-- 모달 4: 입력된 음식 및 영양성분 상세 수정 모달                         -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="editMealModalBackdrop">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2 class="modal-title">✏️ 음식 이름·사진·영양성분 상세 수정</h2>
+        <button class="modal-close-btn" id="closeEditMealModalBtn">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <input type="hidden" id="editMealId" />
+
+        <!-- 사진 미리보기 및 사진 변경/추가 -->
+        <div class="edit-photo-box">
+          <div class="edit-photo-preview-wrap" id="editPhotoPreviewWrap">
+            <img id="editPhotoPreviewEl" alt="음식 사진" class="hidden" />
+            <div id="editPhotoEmptyText" class="edit-photo-empty">📷 등록된 사진 없음</div>
+          </div>
+          <div class="edit-photo-actions">
+            <label class="btn-secondary small file-label-btn">
+              📷 사진 촬영/변경
+              <input type="file" accept="image/*" id="editMealPhotoInput" hidden />
+            </label>
+            <button type="button" class="btn-secondary small" id="removeEditMealPhotoBtn">사진 삭제</button>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="editMealDate">날짜</label>
+            <input type="date" id="editMealDate" />
+          </div>
+          <div class="form-group">
+            <label for="editMealType">식사 구분 (끼니)</label>
+            <select id="editMealType">
+              <option value="breakfast">🌅 아침</option>
+              <option value="lunch">☀️ 점심</option>
+              <option value="dinner">🌙 저녁</option>
+              <option value="snack">🍎 간식</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="editFoodName">음식 이름</label>
+            <input type="text" id="editFoodName" placeholder="예: 햇반, 훈제 닭가슴살" />
+          </div>
+          <div class="form-group">
+            <label for="editFoodAmount">섭취 분량 (중량/개수)</label>
+            <input type="text" id="editFoodAmount" placeholder="예: 1개(210g), 200g" />
+          </div>
+        </div>
+
+        <div class="edit-macros-header">
+          <label>📊 칼로리 및 영양성분 수정</label>
+          <button type="button" class="btn-outline small" id="calcCalFromMacrosBtn" title="탄수화물×4 + 단백질×4 + 지방×9 공식으로 칼로리를 계산합니다">
+            🧮 탄·단·지로 칼로리 자동계산
+          </button>
+        </div>
+
+        <div class="form-group">
+          <label for="editCalories">🔥 칼로리 (kcal)</label>
+          <input type="number" step="1" min="0" id="editCalories" />
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="editCarbs">🔵 탄수화물 (g)</label>
+            <input type="number" step="0.1" min="0" id="editCarbs" />
+          </div>
+          <div class="form-group">
+            <label for="editProtein">🟢 단백질 (g)</label>
+            <input type="number" step="0.1" min="0" id="editProtein" />
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="editFat">🟠 지방 (g)</label>
+            <input type="number" step="0.1" min="0" id="editFat" />
+          </div>
+          <div class="form-group">
+            <label for="editSugar">🟣 당류 (g)</label>
+            <input type="number" step="0.1" min="0" id="editSugar" />
+          </div>
+        </div>
+
+        <label class="save-fav-checkbox-row">
+          <input type="checkbox" id="editAlsoUpdateFavCheck" />
+          <span>⭐ 수정한 영양성분과 사진을 <b>[빠른 음식 클릭 추가]</b> 즐겨찾기에도 함께 저장/업데이트</span>
+        </label>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="cancelEditMealBtn">취소</button>
+        <button type="button" class="btn-primary" id="saveEditMealBtn">💾 수정사항 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- 모달 5: 음식 사진 크게 보기 (확대 뷰어)                                -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="photoViewerBackdrop">
+    <div class="photo-viewer-box">
+      <img id="photoViewerImg" alt="음식 사진 확대" />
+      <div class="photo-viewer-caption" id="photoViewerCaption"></div>
+      <button type="button" class="btn-primary" id="closePhotoViewerBtn">닫기 ✕</button>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
   <!-- 로그인 화면 (클라우드 서버에 APP_PASSWORD가 설정된 경우)               -->
   <!-- ====================================================================== -->
   <div class="login-overlay hidden" id="loginOverlay">

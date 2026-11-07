@@ -710,11 +710,12 @@ app.put('/api/meals/:id', async (req, res) => {
   const updatedProtein = Math.max(0, Number(b.protein ?? existing.protein) || 0);
   const updatedFat = Math.max(0, Number(b.fat ?? existing.fat) || 0);
   const updatedSugar = Math.max(0, Number(b.sugar ?? existing.sugar) || 0);
+  const updatedImage = b.image_data !== undefined ? b.image_data : existing.image_data;
 
   await dbRun(`
     UPDATE meals
     SET date = ?, meal_type = ?, food_name = ?, amount = ?,
-        calories = ?, carbs = ?, protein = ?, fat = ?, sugar = ?
+        calories = ?, carbs = ?, protein = ?, fat = ?, sugar = ?, image_data = ?
     WHERE id = ?
   `, [
     updatedDate,
@@ -726,6 +727,7 @@ app.put('/api/meals/:id', async (req, res) => {
     updatedProtein,
     updatedFat,
     updatedSugar,
+    updatedImage,
     id
   ]);
 
@@ -861,11 +863,12 @@ app.get('/api/foods/suggest', async (req, res) => {
   // 1순위: 내가 성분표로 등록해 둔 즐겨찾기 빠른 음식 (my_foods)
   const favRows = await dbAll('SELECT * FROM my_foods ORDER BY id DESC');
 
-  // 2순위: 최근 내가 기록했던 음식 (중복 제거)
+  // 2순위: 최근 내가 기록했던 음식 (중복 제거, 사진 포함)
   const recentRows = await dbAll(`
     SELECT food_name, amount, ROUND(AVG(calories)) as calories,
            ROUND(AVG(carbs), 1) as carbs, ROUND(AVG(protein), 1) as protein,
            ROUND(AVG(fat), 1) as fat, ROUND(AVG(sugar), 1) as sugar,
+           MAX(image_data) as image_data,
            COUNT(*) as freq
     FROM meals
     GROUP BY food_name
@@ -905,6 +908,7 @@ app.get('/api/foods/suggest', async (req, res) => {
         protein: r.protein,
         fat: r.fat,
         sugar: r.sugar,
+        image_data: r.image_data || null,
         source: 'recent',
         freq: r.freq
       });
