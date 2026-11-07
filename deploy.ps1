@@ -1,4 +1,4 @@
-# 변경된 코드를 GitHub에 올려 Render 클라우드에 자동 배포합니다.
+﻿# 변경된 코드를 GitHub에 올려 Render 클라우드에 자동 배포합니다.
 # 사용법: npm run deploy  또는  .\deploy.ps1 "변경 내용 메모"
 param([string]$Message = "")
 
