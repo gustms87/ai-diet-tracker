@@ -769,12 +769,8 @@ function captureLivePhoto() {
     previewEl.src = state.uploadedImageBase64;
     document.getElementById('imagePreviewWrap').classList.remove('hidden');
 
-    if (state.settings.has_gemini_key) {
-      showToast('📸 촬영 완료! AI가 자동으로 칼로리를 분석합니다...');
-      runAiAnalyze();
-    } else {
-      showToast('📸 사진이 촬영되었습니다! [AI 칼로리 계산]을 누르거나 음식 이름을 적어주세요.');
-    }
+    showToast('📸 촬영 완료! 내 PC에서 사진을 분석합니다...');
+    runAiAnalyze();
   };
   img.src = canvas.toDataURL('image/jpeg', 0.9);
 }
@@ -807,8 +803,8 @@ function processImageFile(file, autoAnalyzeIfKey = true) {
       if (state.modalMode === 'text') {
         setModalMode('photo');
       }
-      if (autoAnalyzeIfKey && state.settings.has_gemini_key) {
-        showToast('사진 업로드 완료! AI가 자동으로 칼로리를 계산합니다...');
+      if (autoAnalyzeIfKey) {
+        showToast('사진 준비 완료! 내 PC에서 칼로리를 계산합니다...');
         runAiAnalyze();
       } else {
         showToast('이미지가 준비되었습니다. [AI 칼로리 계산]을 눌러보세요!');

@@ -5,6 +5,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { createClient } = require('@libsql/client');
 const { KOREAN_FOOD_DB, estimateFromTextFallback } = require('./food-db');
+const { analyzeImageOnLocalPC } = require('./local-vision');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -914,23 +915,24 @@ app.post('/api/ai/analyze', async (req, res) => {
     const settings = await getAllSettings();
     const apiKey = (settings.gemini_api_key || '').trim();
 
-    // 1. Gemini API 키가 있는 경우 -> 정밀 AI 멀티모달 분석 수행
-    if (apiKey.length > 5) {
-      const parts = [];
+    // 1. 유효한 형식의 Gemini API 키(AIza...)가 있는 경우에만 외부 API 시도, 실패 시 자동으로 내 PC 로컬 분석으로 전환
+    if (apiKey.startsWith('AIza') && apiKey.length > 20) {
+      try {
+        const parts = [];
 
-      if (imageBase64) {
-        const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
-        parts.push({
-          inlineData: {
-            mimeType: mimeType || 'image/jpeg',
-            data: cleanBase64
-          }
-        });
-      }
+        if (imageBase64) {
+          const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
+          parts.push({
+            inlineData: {
+              mimeType: mimeType || 'image/jpeg',
+              data: cleanBase64
+            }
+          });
+        }
 
-      let systemPrompt = '';
-      if (mode === 'menu_table') {
-        systemPrompt = `당신은 한국 전문 영양사 및 식단표 OCR 분석 AI입니다.
+        let systemPrompt = '';
+        if (mode === 'menu_table') {
+          systemPrompt = `당신은 한국 전문 영양사 및 식단표 OCR 분석 AI입니다.
 사용자가 업로드한 '식단표(구내식당/학교/회사/병원 주간·월간·일간 식단표 캡처 이미지)'와 추가 메모를 분석하세요.
 기준 날짜(targetDate): ${targetDate}, 기본 식사 구분(targetMealType): ${targetMealType}.
 
@@ -958,22 +960,20 @@ app.post('/api/ai/analyze', async (req, res) => {
       ]
     }
   ],
-  "items": [
-    // 사용자가 현재 선택한 끼니에 바로 넣을 수 있도록 대표(또는 첫 번째/요청된) 끼니의 음식 목록
-  ]
+  "items": []
 }`;
-        parts.push({
-          text: text
-            ? `업로드된 식단표 이미지를 분석해 주세요. 사용자 추가 요청/메모: "${text}"`
-            : `업로드된 식단표 이미지를 읽고 날짜별/끼니별 메뉴와 각 메뉴의 칼로리(kcal), 탄수화물(g), 단백질(g), 지방(g), 당류(g)를 계산해 주세요.`
-        });
-      } else {
-        systemPrompt = `당신은 한국 음식과 외식/가정식/다이어트식에 정통한 전문 AI 영양사입니다.
+          parts.push({
+            text: text
+              ? `업로드된 식단표 이미지를 분석해 주세요. 사용자 추가 요청/메모: "${text}"`
+              : `업로드된 식단표 이미지를 읽고 날짜별/끼니별 메뉴와 각 메뉴의 칼로리(kcal), 탄수화물(g), 단백질(g), 지방(g), 당류(g)를 계산해 주세요.`
+          });
+        } else {
+          systemPrompt = `당신은 한국 음식과 외식/가정식/다이어트식에 정통한 전문 AI 영양사입니다.
 사용자가 입력한 텍스트 또는 음식 사진을 분석하여 각 음식별 분량과 영양성분(칼로리 kcal, 탄수화물 g, 단백질 g, 지방 g, 당류 g)을 정확하게 추정하세요.
 
 반드시 다음 JSON 스키마 형식으로만 응답하세요:
 {
-  "summary": "식사 구성에 대한 친절하고 실용적인 영양사 한줄 코멘트 (예: 단백질이 풍부한 식단입니다. 나트륨 배출을 위해 물을 충분히 드세요.)",
+  "summary": "식사 구성에 대한 친절하고 실용적인 영양사 한줄 코멘트",
   "items": [
     {
       "food_name": "한국어 음식명",
@@ -987,59 +987,70 @@ app.post('/api/ai/analyze', async (req, res) => {
     }
   ]
 }`;
-        if (mode === 'photo') {
-          parts.push({
-            text: text
-              ? `이 음식 사진을 분석해 각 음식의 칼로리와 영양성분을 계산해 주세요. 사용자 메모: "${text}"`
-              : `이 음식 사진에 보이는 모든 음식/반찬/음료를 식별하고 1인분 섭취 기준 칼로리와 탄수화물, 단백질, 지방, 당류를 계산해 주세요.`
-          });
-        } else {
-          parts.push({
-            text: `다음 먹은 음식 목록의 칼로리와 영양성분을 분석해 주세요: "${text}"`
-          });
+          if (mode === 'photo') {
+            parts.push({
+              text: text
+                ? `이 음식 사진을 분석해 각 음식의 칼로리와 영양성분을 계산해 주세요. 사용자 메모: "${text}"`
+                : `이 음식 사진에 보이는 모든 음식/반찬/음료를 식별하고 1인분 섭취 기준 칼로리와 탄수화물, 단백질, 지방, 당류를 계산해 주세요.`
+            });
+          } else {
+            parts.push({
+              text: `다음 먹은 음식 목록의 칼로리와 영양성분을 분석해 주세요: "${text}"`
+            });
+          }
         }
+
+        const { parsed, modelUsed } = await callGeminiAPI({
+          apiKey,
+          preferredModel: settings.gemini_model,
+          parts,
+          systemInstruction: systemPrompt
+        });
+
+        let flatItems = Array.isArray(parsed.items) ? parsed.items : [];
+        if (flatItems.length === 0 && Array.isArray(parsed.slots) && parsed.slots.length > 0) {
+          flatItems = parsed.slots[0].items || [];
+        }
+
+        return res.json({
+          engine: `Google Gemini (${modelUsed})`,
+          mode,
+          summary: parsed.summary || 'AI 영양성분 분석이 완료되었습니다.',
+          is_multi_slot: Boolean(parsed.is_multi_slot && Array.isArray(parsed.slots) && parsed.slots.length > 0),
+          slots: Array.isArray(parsed.slots) ? parsed.slots : [],
+          items: flatItems
+        });
+      } catch (geminiErr) {
+        console.warn('[Gemini API 호출 실패 -> 내 PC 로컬 분석으로 자동 전환]:', geminiErr.message);
       }
-
-      const { parsed, modelUsed } = await callGeminiAPI({
-        apiKey,
-        preferredModel: settings.gemini_model,
-        parts,
-        systemInstruction: systemPrompt
-      });
-
-      // slots만 있고 items가 비어있다면 첫 번째 slot의 items를 기본 채움
-      let flatItems = Array.isArray(parsed.items) ? parsed.items : [];
-      if (flatItems.length === 0 && Array.isArray(parsed.slots) && parsed.slots.length > 0) {
-        flatItems = parsed.slots[0].items || [];
-      }
-
-      return res.json({
-        engine: `Google Gemini (${modelUsed})`,
-        mode,
-        summary: parsed.summary || 'AI 영양성분 분석이 완료되었습니다.',
-        is_multi_slot: Boolean(parsed.is_multi_slot && Array.isArray(parsed.slots) && parsed.slots.length > 0),
-        slots: Array.isArray(parsed.slots) ? parsed.slots : [],
-        items: flatItems
-      });
     }
 
-    // 2. Gemini API 키가 아직 설정되지 않은 경우 -> 내장 한국 음식 DB 폴백 처리
+    // 2. Gemini API 키가 설정되지 않은 경우 -> 내 PC에서 직접 로컬 분석 수행 (API 키 불필요!)
+    if (imageBase64) {
+      const localResult = await analyzeImageOnLocalPC({
+        mode,
+        text,
+        imageBase64,
+        targetDate,
+        targetMealType
+      });
+      return res.json(localResult);
+    }
+
     if (text && text.trim().length > 0) {
       const fallbackItems = estimateFromTextFallback(text);
       return res.json({
-        engine: '내장 한국음식 영양DB (오프라인 스마트 추정)',
+        engine: '내 PC 내장 한국음식 영양DB',
         mode,
-        summary: '내장 영양 데이터베이스로 계산되었습니다. 우측 상단 [설정]에서 무료 Google Gemini API 키를 등록하면 음식 사진·식단표 캡처 이미지 자동 인식까지 사용할 수 있습니다!',
+        summary: '내 PC 내장 영양 데이터베이스로 즉시 계산되었습니다!',
         is_multi_slot: false,
         slots: [],
         items: fallbackItems
       });
     }
 
-    // 이미지 업로드인데 API 키도 없고 텍스트 설명도 없는 경우
     return res.status(400).json({
-      requiresApiKey: true,
-      error: '음식 사진 및 식단표 캡처 이미지를 AI로 인식하려면 무료 Google Gemini API 키 설정이 필요합니다. 우측 상단 [⚙️ 설정] 버튼에서 API 키를 등록하거나, 아래 입력창에 음식 이름을 함께 적어주세요.'
+      error: '먹은 음식 이름을 적거나 음식/식단표 사진을 먼저 올려주세요.'
     });
   } catch (err) {
     console.error('[AI Analyze Error]:', err);

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ai-diet-tracker-v3';
+const CACHE_NAME = 'ai-diet-tracker-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
