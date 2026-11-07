@@ -183,11 +183,12 @@
       <div class="ai-quick-banner">
         <div class="ai-banner-text">
           <strong>🤖 AI 자동 칼로리 계산기</strong>
-          <span>먹은 음식을 적거나, 음식 사진 또는 구내식당 주간 식단표 캡처를 올리면 알아서 계산합니다!</span>
+          <span>먹은 음식을 적거나, 카메라로 바로 찍거나, 음식/식단표 캡처 사진을 올리면 알아서 계산합니다!</span>
         </div>
         <div class="ai-banner-buttons">
           <button class="btn-primary" id="openAiTextBtn">✍️ 음식 적기</button>
-          <button class="btn-accent" id="openAiPhotoBtn">📸 음식 사진</button>
+          <button class="btn-accent" id="openAiLiveCamBtn">📷 카메라 바로 촬영</button>
+          <button class="btn-secondary" id="openAiPhotoBtn">🖼️ 음식 사진 올리기</button>
           <button class="btn-dark" id="openAiMenuTableBtn">🗓️ 식단표 캡처</button>
         </div>
       </div>
@@ -353,30 +354,43 @@
         <!-- 입력 방식 선택 탭 -->
         <div class="mode-switch-tabs">
           <button class="mode-tab active" data-mode="text">✍️ 음식 이름 적기</button>
-          <button class="mode-tab" data-mode="photo">📸 음식 사진 캡처</button>
-          <button class="mode-tab" data-mode="menu_table">🗓️ 식단표 캡처 인식</button>
+          <button class="mode-tab" data-mode="photo">📸 음식 촬영 / 사진</button>
+          <button class="mode-tab" data-mode="menu_table">🗓️ 식단표 촬영 / 캡처</button>
         </div>
 
-        <!-- 이미지 업로드 영역 (photo 또는 menu_table 모드일 때 표시) -->
+        <!-- 이미지 업로드 및 실시간 카메라 영역 (photo 또는 menu_table 모드일 때 표시) -->
         <div class="image-upload-zone hidden" id="imageUploadZone">
           <div class="upload-actions-row">
+            <button type="button" class="upload-btn live-cam" id="startLiveCameraBtn">
+              🎥 앱 내 카메라 켜서 바로 찍기
+            </button>
             <label class="upload-btn camera">
-              📷 카메라 바로 촬영
+              📱 폰 기본 카메라 앱 촬영
               <input type="file" accept="image/*" capture="environment" id="cameraFileInput" hidden />
             </label>
             <label class="upload-btn gallery">
-              🖼️ 사진/캡처 파일 선택
+              🖼️ 앨범/캡처 사진 선택
               <input type="file" accept="image/*" id="galleryFileInput" hidden />
             </label>
           </div>
           <p class="upload-hint" id="uploadHintText">
-            💡 휴대폰에서는 카메라 촬영/갤러리 선택을, PC에서는 캡처 후 <b>Ctrl + V (붙여넣기)</b> 또는 이미지 드래그 앤 드롭을 바로 사용하실 수 있습니다!
+            💡 <b>[카메라 켜서 바로 찍기]</b> 또는 <b>[폰 기본 카메라 앱 촬영]</b>으로 지금 바로 찍어서 올리거나, 앨범 사진 선택 / PC <b>Ctrl + V</b> 붙여넣기를 사용할 수 있습니다!
           </p>
+
+          <!-- 앱 내 실시간 카메라 뷰파인더 -->
+          <div class="live-camera-box hidden" id="liveCameraBox">
+            <video id="liveCameraVideo" autoplay playsinline muted></video>
+            <div class="live-camera-controls">
+              <button type="button" class="btn-secondary small" id="switchCameraFacingBtn">🔄 전/후면 전환</button>
+              <button type="button" class="btn-primary" id="captureLivePhotoBtn">📸 찰칵! 찍기</button>
+              <button type="button" class="btn-secondary small" id="closeLiveCameraBtn">닫기 ✕</button>
+            </div>
+          </div>
 
           <!-- 이미지 미리보기 -->
           <div class="image-preview-wrap hidden" id="imagePreviewWrap">
             <img id="imagePreviewEl" alt="업로드 미리보기" />
-            <button type="button" class="remove-img-btn" id="removeImageBtn">이미지 지우기 ✕</button>
+            <button type="button" class="remove-img-btn" id="removeImageBtn">사진 다시 찍기 / 지우기 ✕</button>
           </div>
         </div>
 

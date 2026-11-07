@@ -388,6 +388,7 @@ function renderDailyView() {
         </div>
         <div class="meal-slot-actions">
           <span class="meal-slot-cal-badge">${Math.round(slotStats.calories).toLocaleString()} kcal</span>
+          <button class="btn-accent small" data-cam-slot="${slot.key}" title="${slot.label} 바로 카메라 촬영">📷 촬영</button>
           <button class="btn-primary small" data-add-slot="${slot.key}">+ 추가</button>
         </div>
       </div>
@@ -398,10 +399,16 @@ function renderDailyView() {
     container.appendChild(card);
   }
 
-  // 끼니별 추가/수정/삭제 이벤트 연결
+  // 끼니별 추가/카메라촬영/수정/삭제 이벤트 연결
   container.querySelectorAll('[data-add-slot]').forEach(el => {
     el.addEventListener('click', () => {
       openMealModal({ mealType: el.dataset.addSlot, mode: 'text' });
+    });
+  });
+
+  container.querySelectorAll('[data-cam-slot]').forEach(el => {
+    el.addEventListener('click', async () => {
+      await openMealModal({ mealType: el.dataset.camSlot, mode: 'photo', autoStartCamera: true });
     });
   });
 
@@ -635,15 +642,19 @@ function renderYearlyView() {
 }
 
 // ============================================================================
-// AI 식단 등록 모달 (텍스트 / 음식 사진 / 식단표 캡처)
+// AI 식단 등록 모달 (텍스트 / 음식 사진 / 식단표 캡처 / 실시간 카메라)
 // ============================================================================
-async function openMealModal({ mealType = 'lunch', mode = 'text' } = {}) {
+let liveCameraStream = null;
+let currentCameraFacing = 'environment'; // 'environment'(후면) | 'user'(전면)
+
+async function openMealModal({ mealType = 'lunch', mode = 'text', autoStartCamera = false } = {}) {
   document.getElementById('modalDateInput').value = state.selectedDate;
   document.getElementById('modalMealTypeSelect').value = mealType;
   document.getElementById('aiPromptInput').value = '';
   document.getElementById('aiResultSummaryBox').classList.add('hidden');
   document.getElementById('multiSlotBox').classList.add('hidden');
 
+  stopLiveCamera();
   clearUploadedImage();
   state.stagedItems = [];
   state.detectedSlots = [];
@@ -652,6 +663,15 @@ async function openMealModal({ mealType = 'lunch', mode = 'text' } = {}) {
   setModalMode(mode);
   document.getElementById('mealModalBackdrop').classList.remove('hidden');
   await loadFoodSuggestions('');
+
+  if (autoStartCamera) {
+    startLiveCamera();
+  }
+}
+
+function closeMealModal() {
+  stopLiveCamera();
+  document.getElementById('mealModalBackdrop').classList.add('hidden');
 }
 
 function setModalMode(mode) {
@@ -665,6 +685,7 @@ function setModalMode(mode) {
   const promptInput = document.getElementById('aiPromptInput');
 
   if (mode === 'text') {
+    stopLiveCamera();
     imgZone.classList.add('hidden');
     promptLabel.textContent = '먹은 음식 입력 (쉼표나 줄바꿈으로 구분해 적어보세요)';
     promptInput.placeholder = '예: 잡곡밥 1공기, 된장찌개 1인분, 고등어구이 1토막, 아이스 아메리카노 1잔';
@@ -679,6 +700,85 @@ function setModalMode(mode) {
   }
 }
 
+async function startLiveCamera() {
+  stopLiveCamera();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    // 브라우저가 인앱 웹캠 스트림을 지원하지 않으면 휴대폰 기본 카메라 앱 즉시 호출
+    document.getElementById('cameraFileInput').click();
+    return;
+  }
+
+  try {
+    liveCameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: currentCameraFacing },
+        width: { ideal: 1280 },
+        height: { ideal: 960 }
+      },
+      audio: false
+    });
+    const videoEl = document.getElementById('liveCameraVideo');
+    videoEl.srcObject = liveCameraStream;
+    document.getElementById('liveCameraBox').classList.remove('hidden');
+    document.getElementById('imagePreviewWrap').classList.add('hidden');
+  } catch (err) {
+    // 권한 거부 또는 지원 안 될 경우 휴대폰 기본 카메라로 폴백
+    showToast('기본 카메라 앱을 실행합니다.');
+    document.getElementById('cameraFileInput').click();
+  }
+}
+
+function stopLiveCamera() {
+  if (liveCameraStream) {
+    liveCameraStream.getTracks().forEach(track => track.stop());
+    liveCameraStream = null;
+  }
+  const videoEl = document.getElementById('liveCameraVideo');
+  if (videoEl) videoEl.srcObject = null;
+  const box = document.getElementById('liveCameraBox');
+  if (box) box.classList.add('hidden');
+}
+
+async function switchCameraFacing() {
+  currentCameraFacing = currentCameraFacing === 'environment' ? 'user' : 'environment';
+  await startLiveCamera();
+}
+
+function captureLivePhoto() {
+  const videoEl = document.getElementById('liveCameraVideo');
+  if (!videoEl || !videoEl.videoWidth) {
+    showToast('카메라 화면이 아직 준비되지 않았습니다.');
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = videoEl.videoWidth;
+  canvas.height = videoEl.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+
+  const img = new Image();
+  img.onload = () => {
+    state.uploadedImageBase64 = resizeImageToDataUrl(img, 1280, 0.82);
+    state.uploadedThumbBase64 = resizeImageToDataUrl(img, 140, 0.7);
+    state.uploadedMimeType = 'image/jpeg';
+
+    stopLiveCamera();
+
+    const previewEl = document.getElementById('imagePreviewEl');
+    previewEl.src = state.uploadedImageBase64;
+    document.getElementById('imagePreviewWrap').classList.remove('hidden');
+
+    if (state.settings.has_gemini_key) {
+      showToast('📸 촬영 완료! AI가 자동으로 칼로리를 분석합니다...');
+      runAiAnalyze();
+    } else {
+      showToast('📸 사진이 촬영되었습니다! [AI 칼로리 계산]을 누르거나 음식 이름을 적어주세요.');
+    }
+  };
+  img.src = canvas.toDataURL('image/jpeg', 0.9);
+}
+
 function clearUploadedImage() {
   state.uploadedImageBase64 = '';
   state.uploadedThumbBase64 = '';
@@ -689,8 +789,9 @@ function clearUploadedImage() {
 }
 
 // 이미지 압축 (AI 분석용 1280px & DB 썸네일용 160px)
-function processImageFile(file) {
+function processImageFile(file, autoAnalyzeIfKey = true) {
   if (!file || !file.type.startsWith('image/')) return;
+  stopLiveCamera();
   const reader = new FileReader();
   reader.onload = (e) => {
     const img = new Image();
@@ -706,7 +807,12 @@ function processImageFile(file) {
       if (state.modalMode === 'text') {
         setModalMode('photo');
       }
-      showToast('이미지가 준비되었습니다. [AI 칼로리 계산]을 눌러보세요!');
+      if (autoAnalyzeIfKey && state.settings.has_gemini_key) {
+        showToast('사진 업로드 완료! AI가 자동으로 칼로리를 계산합니다...');
+        runAiAnalyze();
+      } else {
+        showToast('이미지가 준비되었습니다. [AI 칼로리 계산]을 눌러보세요!');
+      }
     };
     img.src = e.target.result;
   };
@@ -861,7 +967,7 @@ async function saveSelectedMultiSlots() {
     body: JSON.stringify({ items: batchItems })
   });
 
-  document.getElementById('mealModalBackdrop').classList.add('hidden');
+  closeMealModal();
   showToast(`식단표에서 선택한 ${checks.length}개 끼니(${batchItems.length}개 메뉴)가 일괄 저장되었습니다!`);
   await refreshCurrentView();
 }
@@ -991,7 +1097,7 @@ async function saveStagedMeals() {
     })
   });
 
-  document.getElementById('mealModalBackdrop').classList.add('hidden');
+  closeMealModal();
   state.selectedDate = date;
   showToast('식단이 저장되어 모든 기기에 동기화되었습니다!');
   await refreshCurrentView();
@@ -1111,17 +1217,19 @@ function bindEvents() {
 
   // AI 배너 버튼 & 모바일 중앙 + 버튼
   document.getElementById('openAiTextBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'text' }));
+  document.getElementById('openAiLiveCamBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'photo', autoStartCamera: true }));
   document.getElementById('openAiPhotoBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'photo' }));
   document.getElementById('openAiMenuTableBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'menu_table' }));
   document.getElementById('mobileQuickAddBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'text' }));
 
   // 식단 모달 내부 이벤트
-  document.getElementById('closeMealModalBtn').addEventListener('click', () => {
-    document.getElementById('mealModalBackdrop').classList.add('hidden');
-  });
-  document.getElementById('cancelMealModalBtn').addEventListener('click', () => {
-    document.getElementById('mealModalBackdrop').classList.add('hidden');
-  });
+  document.getElementById('closeMealModalBtn').addEventListener('click', closeMealModal);
+  document.getElementById('cancelMealModalBtn').addEventListener('click', closeMealModal);
+
+  document.getElementById('startLiveCameraBtn').addEventListener('click', startLiveCamera);
+  document.getElementById('switchCameraFacingBtn').addEventListener('click', switchCameraFacing);
+  document.getElementById('captureLivePhotoBtn').addEventListener('click', captureLivePhoto);
+  document.getElementById('closeLiveCameraBtn').addEventListener('click', stopLiveCamera);
 
   document.querySelectorAll('.mode-tab').forEach(tab => {
     tab.addEventListener('click', () => setModalMode(tab.dataset.mode));
