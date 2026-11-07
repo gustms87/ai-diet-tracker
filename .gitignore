@@ -5,3 +5,5 @@ data/
 *.db-wal
 *.db-shm
 npm-debug.log*
+cloudflared.exe
+

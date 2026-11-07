@@ -212,10 +212,15 @@ async function loadServerInfo() {
       const url = info.publicUrl || window.location.origin;
       box.innerHTML = `<div>☁️ 클라우드 주소 (어디서나 접속 가능): <a href="${url}" target="_blank">${url}</a></div>
         <div style="font-size:0.78rem;font-weight:500;color:#475569;margin-top:4px;">저장소: ${escapeHtml(info.database)}</div>`;
-    } else if (info.localUrls && info.localUrls.length > 0) {
-      box.innerHTML = info.localUrls.map(u => `<div>🔗 <a href="${u}" target="_blank">${u}</a></div>`).join('');
     } else {
-      box.textContent = window.location.origin;
+      const lines = [];
+      if (info.tunnelUrl) {
+        lines.push(`<div style="margin-bottom:6px;">🌍 <b>LTE/외부 접속 주소:</b> <a href="${info.tunnelUrl}" target="_blank">${info.tunnelUrl}</a></div>`);
+      }
+      if (info.localUrls && info.localUrls.length > 0) {
+        lines.push(...info.localUrls.map(u => `<div>🏠 <b>집 Wi-Fi 주소:</b> <a href="${u}" target="_blank">${u}</a></div>`));
+      }
+      box.innerHTML = lines.length > 0 ? lines.join('') : window.location.origin;
     }
   } catch (_) {}
 }

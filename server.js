@@ -295,15 +295,31 @@ function getLocalNetworkUrls(port) {
   return urls;
 }
 
+function getDetectedTunnelUrl() {
+  try {
+    const logPath = path.join(DATA_DIR, 'tunnel.log');
+    if (fs.existsSync(logPath)) {
+      const content = fs.readFileSync(logPath, 'utf8');
+      const matches = content.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi);
+      if (matches && matches.length > 0) {
+        return matches[matches.length - 1];
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
 app.get('/api/server-info', async (req, res) => {
   const settings = await getAllSettings();
   const isCloud = Boolean(process.env.RENDER || process.env.RENDER_EXTERNAL_URL);
+  const tunnelUrl = getDetectedTunnelUrl();
   res.json({
     hostname: os.hostname(),
     platform: `${os.platform()} (${os.arch()})`,
     nodeVersion: process.version,
     isCloud,
-    publicUrl: process.env.RENDER_EXTERNAL_URL || null,
+    publicUrl: process.env.RENDER_EXTERNAL_URL || tunnelUrl || null,
+    tunnelUrl,
     database: USING_TURSO ? 'Turso 클라우드 DB' : '로컬 SQLite 파일',
     localUrls: isCloud ? [] : getLocalNetworkUrls(PORT),
     connectedClients: sseClients.size,
