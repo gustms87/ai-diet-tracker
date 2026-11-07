@@ -766,8 +766,8 @@ function captureLivePhoto() {
 
   const img = new Image();
   img.onload = () => {
-    state.uploadedImageBase64 = resizeImageToDataUrl(img, 1280, 0.82);
-    state.uploadedThumbBase64 = resizeImageToDataUrl(img, 140, 0.7);
+    state.uploadedImageBase64 = resizeImageToDataUrl(img, 1600, 0.92);
+    state.uploadedThumbBase64 = resizeImageToDataUrl(img, 140, 0.75);
     state.uploadedMimeType = 'image/jpeg';
 
     stopLiveCamera();
@@ -776,10 +776,11 @@ function captureLivePhoto() {
     previewEl.src = state.uploadedImageBase64;
     document.getElementById('imagePreviewWrap').classList.remove('hidden');
 
-    showToast('📸 촬영 완료! 내 PC에서 사진을 분석합니다...');
+    state.stagedItems = [];
+    showToast('📸 촬영 완료! 사진에 적힌 칼로리·성분을 우선 추출합니다...');
     runAiAnalyze();
   };
-  img.src = canvas.toDataURL('image/jpeg', 0.9);
+  img.src = canvas.toDataURL('image/jpeg', 0.95);
 }
 
 function clearUploadedImage() {
@@ -791,7 +792,7 @@ function clearUploadedImage() {
   document.getElementById('galleryFileInput').value = '';
 }
 
-// 이미지 압축 (AI 분석용 1280px & DB 썸네일용 160px)
+// 이미지 압축 (OCR/분석용 1600px 고화질 & DB 썸네일용 140px)
 function processImageFile(file, autoAnalyzeIfKey = true) {
   if (!file || !file.type.startsWith('image/')) return;
   stopLiveCamera();
@@ -799,8 +800,8 @@ function processImageFile(file, autoAnalyzeIfKey = true) {
   reader.onload = (e) => {
     const img = new Image();
     img.onload = () => {
-      state.uploadedImageBase64 = resizeImageToDataUrl(img, 1280, 0.82);
-      state.uploadedThumbBase64 = resizeImageToDataUrl(img, 140, 0.7);
+      state.uploadedImageBase64 = resizeImageToDataUrl(img, 1600, 0.92);
+      state.uploadedThumbBase64 = resizeImageToDataUrl(img, 140, 0.75);
       state.uploadedMimeType = 'image/jpeg';
 
       const previewEl = document.getElementById('imagePreviewEl');
@@ -811,7 +812,8 @@ function processImageFile(file, autoAnalyzeIfKey = true) {
         setModalMode('photo');
       }
       if (autoAnalyzeIfKey) {
-        showToast('사진 준비 완료! 내 PC에서 칼로리를 계산합니다...');
+        state.stagedItems = [];
+        showToast('사진 준비 완료! 사진 속 칼로리·성분을 우선 추출합니다...');
         runAiAnalyze();
       } else {
         showToast('이미지가 준비되었습니다. [AI 칼로리 계산]을 눌러보세요!');
