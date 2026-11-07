@@ -683,20 +683,27 @@ function setModalMode(mode) {
   const imgZone = document.getElementById('imageUploadZone');
   const promptLabel = document.getElementById('aiPromptLabel');
   const promptInput = document.getElementById('aiPromptInput');
+  const favCheck = document.getElementById('alsoSaveToMyFoodsCheck');
 
   if (mode === 'text') {
     stopLiveCamera();
     imgZone.classList.add('hidden');
     promptLabel.textContent = '먹은 음식 입력 (쉼표나 줄바꿈으로 구분해 적어보세요)';
     promptInput.placeholder = '예: 잡곡밥 1공기, 된장찌개 1인분, 고등어구이 1토막, 아이스 아메리카노 1잔';
+    if (favCheck) favCheck.checked = false;
+  } else if (mode === 'nutrition_label') {
+    imgZone.classList.remove('hidden');
+    promptLabel.textContent = '🏷️ 제품 이름 입력 (예: 햇반, 하림 닭가슴살, 더단백 등 · 비워두어도 됩니다)';
+    promptInput.placeholder = '예: 햇반 210g / 한끼통살 닭가슴살 (뒷면 영양정보 표를 가까이 선명하게 찍어주세요!)';
+    if (favCheck) favCheck.checked = true;
   } else if (mode === 'photo') {
     imgZone.classList.remove('hidden');
     promptLabel.textContent = '음식 사진 보충 메모 (선택사항)';
-    promptInput.placeholder = '예: 밥은 반공기만 먹었어요 / 2인분 중 절반 섭취 등 (비워두어도 사진을 AI가 자동 분석합니다)';
+    promptInput.placeholder = '예: 밥은 반공기만 먹었어요 / 2인분 중 절반 섭취 등 (비워두어도 사진을 분석합니다)';
   } else if (mode === 'menu_table') {
     imgZone.classList.remove('hidden');
     promptLabel.textContent = '식단표 캡처 보충 메모 (선택사항)';
-    promptInput.placeholder = '예: 수요일 중식 메뉴만 계산해줘 / 혹은 비워두시면 식단표 전체 끼니를 자동 추출합니다!';
+    promptInput.placeholder = '예: 수요일 중식 메뉴만 계산해줘 / 혹은 비워두시면 식단표 메뉴를 자동 추출합니다!';
   }
 }
 
@@ -1039,15 +1046,24 @@ async function loadFoodSuggestions(query) {
     const res = await fetch(`/api/foods/suggest?q=${encodeURIComponent(query)}`);
     const data = await res.json();
     const container = document.getElementById('quickFoodChipsContainer');
-    container.innerHTML = (data.suggestions || []).map((s, i) => `
-      <button type="button" class="food-chip" data-sug-idx="${i}">
-        <span>${s.source === 'recent' ? '🕒' : '🥗'} ${escapeHtml(s.food_name)}</span>
-        <small>${Math.round(s.calories)}kcal</small>
-      </button>
-    `).join('');
+    container.innerHTML = (data.suggestions || []).map((s, i) => {
+      const icon = s.source === 'favorite' ? '⭐' : (s.source === 'recent' ? '🕒' : '🥗');
+      const favClass = s.source === 'favorite' ? ' favorite' : '';
+      const delHtml = s.source === 'favorite' && s.id
+        ? `<span class="fav-del-x" data-del-fav="${s.id}" title="즐겨찾기에서 삭제">×</span>`
+        : '';
+      return `
+        <button type="button" class="food-chip${favClass}" data-sug-idx="${i}">
+          <span>${icon} ${escapeHtml(s.food_name)}</span>
+          <small>${Math.round(s.calories)}kcal</small>
+          ${delHtml}
+        </button>
+      `;
+    }).join('');
 
     container.querySelectorAll('.food-chip').forEach(chip => {
-      chip.addEventListener('click', () => {
+      chip.addEventListener('click', (e) => {
+        if (e.target.dataset?.delFav) return;
         const item = data.suggestions[Number(chip.dataset.sugIdx)];
         state.stagedItems.push({
           food_name: item.food_name,
@@ -1057,12 +1073,49 @@ async function loadFoodSuggestions(query) {
           protein: item.protein,
           fat: item.fat,
           sugar: item.sugar || 0,
-          ai_note: item.source === 'recent' ? '내가 자주 먹은 메뉴' : '한국음식 영양DB'
+          ai_note: item.source === 'favorite' ? '⭐ 내 빠른 음식' : (item.source === 'recent' ? '내가 자주 먹은 메뉴' : '한국음식 영양DB')
         });
         renderStagedItems();
       });
     });
+
+    container.querySelectorAll('[data-del-fav]').forEach(delBtn => {
+      delBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = delBtn.dataset.delFav;
+        await fetch(`/api/my-foods/${id}`, { method: 'DELETE' });
+        showToast('빠른 음식 즐겨찾기에서 삭제되었습니다.');
+        await loadFoodSuggestions(document.getElementById('quickFoodSearchInput').value);
+      });
+    });
   } catch (_) {}
+}
+
+async function saveStagedToMyFoodsOnly() {
+  const promptText = document.getElementById('aiPromptInput').value.trim();
+  if (state.stagedItems.length === 0 && (promptText || state.uploadedImageBase64)) {
+    await runAiAnalyze();
+    if (state.stagedItems.length === 0) return;
+  }
+
+  if (state.stagedItems.length === 0) {
+    showToast('먼저 성분표를 촬영하거나 음식을 추가해 주세요.');
+    return;
+  }
+
+  await fetch('/api/my-foods', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: state.stagedItems.map(it => ({
+        ...it,
+        image_data: state.uploadedThumbBase64 || null
+      }))
+    })
+  });
+
+  showToast(`⭐ ${state.stagedItems.length}개 식품이 [빠른 음식 클릭 추가]에 영구 등록되었습니다!`);
+  await loadFoodSuggestions(document.getElementById('quickFoodSearchInput').value);
 }
 
 async function saveStagedMeals() {
@@ -1076,6 +1129,21 @@ async function saveStagedMeals() {
   if (state.stagedItems.length === 0) {
     showToast('등록할 음식이 없습니다. 음식을 입력하거나 추가해주세요.');
     return;
+  }
+
+  // '빠른 음식(즐겨찾기)에도 영구 저장' 체크박스가 켜져 있으면 my_foods에도 함께 저장
+  const alsoSaveFav = document.getElementById('alsoSaveToMyFoodsCheck')?.checked;
+  if (alsoSaveFav) {
+    await fetch('/api/my-foods', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items: state.stagedItems.map(it => ({
+          ...it,
+          image_data: state.uploadedThumbBase64 || null
+        }))
+      })
+    });
   }
 
   const date = document.getElementById('modalDateInput').value || state.selectedDate;
@@ -1095,7 +1163,9 @@ async function saveStagedMeals() {
 
   closeMealModal();
   state.selectedDate = date;
-  showToast('식단이 저장되어 모든 기기에 동기화되었습니다!');
+  showToast(alsoSaveFav
+    ? '식단표 및 ⭐빠른 음식 즐겨찾기에 모두 저장되었습니다!'
+    : '식단이 저장되어 모든 기기에 동기화되었습니다!');
   await refreshCurrentView();
 }
 
@@ -1213,10 +1283,16 @@ function bindEvents() {
 
   // AI 배너 버튼 & 모바일 중앙 + 버튼
   document.getElementById('openAiTextBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'text' }));
+  document.getElementById('openAiNutritionLabelBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'nutrition_label', autoStartCamera: true }));
   document.getElementById('openAiLiveCamBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'photo', autoStartCamera: true }));
-  document.getElementById('openAiPhotoBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'photo' }));
   document.getElementById('openAiMenuTableBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'menu_table' }));
   document.getElementById('mobileQuickAddBtn').addEventListener('click', () => openMealModal({ mealType: guessCurrentMealType(), mode: 'text' }));
+
+  document.getElementById('scanLabelForQuickFoodBtn').addEventListener('click', () => {
+    setModalMode('nutrition_label');
+    startLiveCamera();
+  });
+  document.getElementById('saveOnlyToMyFoodsBtn').addEventListener('click', saveStagedToMyFoodsOnly);
 
   // 식단 모달 내부 이벤트
   document.getElementById('closeMealModalBtn').addEventListener('click', closeMealModal);

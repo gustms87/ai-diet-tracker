@@ -182,13 +182,13 @@
       <!-- AI 빠른 등록 액션 배너 -->
       <div class="ai-quick-banner">
         <div class="ai-banner-text">
-          <strong>🤖 AI 자동 칼로리 계산기</strong>
-          <span>먹은 음식을 적거나, 카메라로 바로 찍거나, 음식/식단표 캡처 사진을 올리면 알아서 계산합니다!</span>
+          <strong>🤖 AI 자동 칼로리 & 영양성분표 스캐너</strong>
+          <span>먹은 음식을 적거나, <b>햇반·닭가슴살 영양성분표</b> 또는 <b>음식/식단표</b>를 찍으면 알아서 계산합니다!</span>
         </div>
         <div class="ai-banner-buttons">
           <button class="btn-primary" id="openAiTextBtn">✍️ 음식 적기</button>
-          <button class="btn-accent" id="openAiLiveCamBtn">📷 카메라 바로 촬영</button>
-          <button class="btn-secondary" id="openAiPhotoBtn">🖼️ 음식 사진 올리기</button>
+          <button class="btn-accent" id="openAiNutritionLabelBtn">🏷️ 성분표 찍기(햇반·닭가슴살)</button>
+          <button class="btn-secondary" id="openAiLiveCamBtn">📷 음식 촬영</button>
           <button class="btn-dark" id="openAiMenuTableBtn">🗓️ 식단표 캡처</button>
         </div>
       </div>
@@ -352,10 +352,11 @@
         </div>
 
         <!-- 입력 방식 선택 탭 -->
-        <div class="mode-switch-tabs">
-          <button class="mode-tab active" data-mode="text">✍️ 음식 이름 적기</button>
-          <button class="mode-tab" data-mode="photo">📸 음식 촬영 / 사진</button>
-          <button class="mode-tab" data-mode="menu_table">🗓️ 식단표 촬영 / 캡처</button>
+        <div class="mode-switch-tabs cols-4">
+          <button class="mode-tab active" data-mode="text">✍️ 음식 적기</button>
+          <button class="mode-tab" data-mode="nutrition_label">🏷️ 성분표 찍기</button>
+          <button class="mode-tab" data-mode="photo">📸 음식 사진</button>
+          <button class="mode-tab" data-mode="menu_table">🗓️ 식단표 캡처</button>
         </div>
 
         <!-- 이미지 업로드 및 실시간 카메라 영역 (photo 또는 menu_table 모드일 때 표시) -->
@@ -413,8 +414,13 @@
         <!-- 자주 먹는 음식 & 빠른 검색 칩 -->
         <div class="quick-food-chips-section">
           <div class="chips-header">
-            <span>⚡ 빠른 음식 클릭 추가 (누르면 바로 아래 목록에 담깁니다)</span>
-            <input type="search" id="quickFoodSearchInput" placeholder="음식 빠른 검색 (예: 닭가슴살, 김밥, 라떼)" />
+            <div class="chips-title-group">
+              <span>⚡ 빠른 음식 클릭 추가 (⭐내 등록 음식 · 최근 먹은 음식)</span>
+              <button type="button" class="btn-accent small" id="scanLabelForQuickFoodBtn">
+                📷 성분표 찍어서 빠른음식 추가
+              </button>
+            </div>
+            <input type="search" id="quickFoodSearchInput" placeholder="음식 검색 (예: 햇반, 닭가슴살, 김밥)" />
           </div>
           <div class="food-chips-list" id="quickFoodChipsContainer">
             <!-- JS 렌더링 -->
@@ -440,8 +446,15 @@
         <div class="staged-items-section">
           <div class="staged-header">
             <h4>📋 등록할 음식 목록 (<span id="stagedCountText">0</span>개 · 총 <strong id="stagedTotalCalText">0</strong> kcal)</h4>
-            <button type="button" class="btn-outline small" id="addBlankRowBtn">+ 직접 빈 항목 추가</button>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="btn-outline small" id="addBlankRowBtn">+ 빈 항목 추가</button>
+            </div>
           </div>
+
+          <label class="save-fav-checkbox-row">
+            <input type="checkbox" id="alsoSaveToMyFoodsCheck" />
+            <span>⭐ 이 음식들을 <b>[빠른 음식 클릭 추가]</b> 즐겨찾기 목록에도 영구 저장하기 (다음부터 원터치로 불러오기)</span>
+          </label>
 
           <div class="staged-items-list" id="stagedItemsList">
             <!-- JS에서 음식 행 렌더링 -->
@@ -451,7 +464,8 @@
 
       <div class="modal-footer">
         <button type="button" class="btn-secondary" id="cancelMealModalBtn">취소</button>
-        <button type="button" class="btn-primary" id="saveStagedMealsBtn">💾 식단표에 저장하기</button>
+        <button type="button" class="btn-accent" id="saveOnlyToMyFoodsBtn" title="오늘 식단에는 넣지 않고 빠른 음식 즐겨찾기에만 등록합니다">⭐ 빠른 음식 목록에만 등록</button>
+        <button type="button" class="btn-primary" id="saveStagedMealsBtn">💾 오늘 식단표에 저장하기</button>
       </div>
     </div>
   </div>

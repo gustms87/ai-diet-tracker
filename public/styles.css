@@ -1168,6 +1168,14 @@ button, input, select, textarea {
   border-radius: 12px;
   border: 1px solid var(--border);
 }
+.mode-switch-tabs.cols-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+@media (max-width: 520px) {
+  .mode-switch-tabs.cols-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
 
 .mode-tab {
   border: none;
@@ -1354,6 +1362,13 @@ button, input, select, textarea {
   overflow-y: auto;
 }
 
+.chips-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .food-chip {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -1365,6 +1380,11 @@ button, input, select, textarea {
   align-items: center;
   gap: 4px;
 }
+.food-chip.favorite {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  font-weight: 700;
+}
 .food-chip:hover {
   border-color: var(--primary);
   background: var(--primary-soft);
@@ -1372,6 +1392,30 @@ button, input, select, textarea {
 .food-chip small {
   color: var(--primary-dark);
   font-weight: 700;
+}
+.fav-del-x {
+  margin-left: 3px;
+  color: #ef4444;
+  font-weight: 800;
+  padding: 0 3px;
+  border-radius: 4px;
+}
+.fav-del-x:hover {
+  background: #fee2e2;
+}
+
+.save-fav-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.81rem;
+  color: #1e40af;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 8px 12px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
 }
 
 .ai-result-summary {

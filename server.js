@@ -96,6 +96,18 @@ async function initSchema() {
       water_ml INTEGER DEFAULT 0,
       memo TEXT DEFAULT '',
       updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS my_foods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      food_name TEXT NOT NULL,
+      amount TEXT DEFAULT '1개',
+      calories REAL DEFAULT 0,
+      carbs REAL DEFAULT 0,
+      protein REAL DEFAULT 0,
+      fat REAL DEFAULT 0,
+      sugar REAL DEFAULT 0,
+      image_data TEXT DEFAULT NULL,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
     )`
   ], 'write');
 
@@ -779,12 +791,77 @@ app.post('/api/daily-log', async (req, res) => {
 });
 
 // ============================================================================
-// 음식 자동완성 및 최근 먹은 식단 추천 API
+// 내 빠른 음식 즐겨찾기 (영양성분표 촬영/등록 음식) API & 추천 API
 // ============================================================================
+app.get('/api/my-foods', async (req, res) => {
+  const rows = await dbAll('SELECT * FROM my_foods ORDER BY id DESC');
+  res.json({ myFoods: rows });
+});
+
+app.post('/api/my-foods', async (req, res) => {
+  const { items } = req.body || {};
+  const list = Array.isArray(items) ? items : [req.body];
+  const saved = [];
+
+  for (const it of list) {
+    const foodName = String(it.food_name || '').trim();
+    if (!foodName) continue;
+
+    // 동일한 이름이 이미 있으면 업데이트, 없으면 새로 추가
+    const existing = await dbGet('SELECT id FROM my_foods WHERE food_name = ?', [foodName]);
+    if (existing) {
+      await dbRun(`
+        UPDATE my_foods
+        SET amount = ?, calories = ?, carbs = ?, protein = ?, fat = ?, sugar = ?,
+            image_data = COALESCE(?, image_data)
+        WHERE id = ?
+      `, [
+        String(it.amount || '1개'),
+        Math.max(0, Number(it.calories) || 0),
+        Math.max(0, Number(it.carbs) || 0),
+        Math.max(0, Number(it.protein) || 0),
+        Math.max(0, Number(it.fat) || 0),
+        Math.max(0, Number(it.sugar) || 0),
+        it.image_data || null,
+        existing.id
+      ]);
+      saved.push(existing.id);
+    } else {
+      const r = await dbRun(`
+        INSERT INTO my_foods (food_name, amount, calories, carbs, protein, fat, sugar, image_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        foodName,
+        String(it.amount || '1개'),
+        Math.max(0, Number(it.calories) || 0),
+        Math.max(0, Number(it.carbs) || 0),
+        Math.max(0, Number(it.protein) || 0),
+        Math.max(0, Number(it.fat) || 0),
+        Math.max(0, Number(it.sugar) || 0),
+        it.image_data || null
+      ]);
+      saved.push(r.lastInsertRowid);
+    }
+  }
+
+  broadcastSync('my_foods_updated');
+  res.json({ ok: true, savedIds: saved });
+});
+
+app.delete('/api/my-foods/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  await dbRun('DELETE FROM my_foods WHERE id = ?', [id]);
+  broadcastSync('my_foods_updated');
+  res.json({ ok: true });
+});
+
 app.get('/api/foods/suggest', async (req, res) => {
   const q = String(req.query.q || '').trim().toLowerCase();
 
-  // 최근 내가 기록했던 음식 (중복 제거)
+  // 1순위: 내가 성분표로 등록해 둔 즐겨찾기 빠른 음식 (my_foods)
+  const favRows = await dbAll('SELECT * FROM my_foods ORDER BY id DESC');
+
+  // 2순위: 최근 내가 기록했던 음식 (중복 제거)
   const recentRows = await dbAll(`
     SELECT food_name, amount, ROUND(AVG(calories)) as calories,
            ROUND(AVG(carbs), 1) as carbs, ROUND(AVG(protein), 1) as protein,
@@ -799,8 +876,26 @@ app.get('/api/foods/suggest', async (req, res) => {
   const suggestions = [];
   const seen = new Set();
 
+  for (const f of favRows) {
+    if (!q || f.food_name.toLowerCase().includes(q)) {
+      seen.add(f.food_name);
+      suggestions.push({
+        id: f.id,
+        food_name: f.food_name,
+        amount: f.amount,
+        calories: f.calories,
+        carbs: f.carbs,
+        protein: f.protein,
+        fat: f.fat,
+        sugar: f.sugar,
+        image_data: f.image_data || null,
+        source: 'favorite'
+      });
+    }
+  }
+
   for (const r of recentRows) {
-    if (!q || r.food_name.toLowerCase().includes(q)) {
+    if (!seen.has(r.food_name) && (!q || r.food_name.toLowerCase().includes(q))) {
       seen.add(r.food_name);
       suggestions.push({
         food_name: r.food_name,
@@ -833,7 +928,7 @@ app.get('/api/foods/suggest', async (req, res) => {
         source: 'db'
       });
     }
-    if (suggestions.length >= 25) break;
+    if (suggestions.length >= 30) break;
   }
 
   res.json({ suggestions });
