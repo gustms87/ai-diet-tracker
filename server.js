@@ -4,6 +4,23 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const { createClient } = require('@libsql/client');
+
+// 로컬 .env 파일 자동 로드
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const t = line.trim();
+    if (t && !t.startsWith('#')) {
+      const idx = t.indexOf('=');
+      if (idx !== -1) {
+        const k = t.slice(0, idx).trim();
+        const v = t.slice(idx + 1).trim();
+        if (!process.env[k]) process.env[k] = v;
+      }
+    }
+  }
+}
+
 const { KOREAN_FOOD_DB, estimateFromTextFallback } = require('./food-db');
 const { analyzeImageOnLocalPC } = require('./local-vision');
 
