@@ -336,13 +336,17 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
   const anyNumberFound = calories !== null || anyMacroFound;
 
   // --------------------------------------------------------------------------
-  // 4. 사진 속 텍스트에서 제품명 추출
+  // 4. 사진 속 텍스트에서 제품명 추출 (Windows OCR 줄 목록 우선, 리눅스 클라우드 등은 Tesseract 줄 목록 폴백)
   // --------------------------------------------------------------------------
   let foodName = (userMemo || '').trim();
-  if (!foodName && lines.length > 0) {
+  const candidateLines = lines.length > 0
+    ? lines.map(l => l.text || '')
+    : (tesseractText || '').split(/[\r\n]+/);
+
+  if (!foodName && candidateLines.length > 0) {
     const ignoreLineRx = /영양정보|영양성분|내용량|탄수화물|단백질|포화지방|트랜스지방|콜레스테롤|나트륨|나트름|기준치|kcal|keal|%|원재료|보관방법|소비기한|유통기한|비율/i;
-    for (const l of lines) {
-      const txt = (l.text || '')
+    for (const rawLine of candidateLines) {
+      const txt = rawLine
         .trim()
         .replace(/닭가습살/g, '닭가슴살')
         .replace(/코카클라/g, '코카콜라');
