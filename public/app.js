@@ -85,6 +85,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const [y, m] = state.selectedDate.split('-').map(Number);
   state.selectedYear = y;
   state.selectedMonth = m;
+  document.getElementById('dailyDateInput').value = state.selectedDate;
 
   bindEvents();
   bindLoginForm();
@@ -164,6 +165,12 @@ function connectRealtimeSync() {
       const data = JSON.parse(evt.data);
       if (data.connectedClients) {
         text.textContent = `실시간 동기화 (${data.connectedClients}대 연결됨)`;
+      }
+      if (data.type === 'my_foods_updated') {
+        const modalOpen = !document.getElementById('mealModalBackdrop').classList.contains('hidden');
+        if (modalOpen) {
+          loadFoodSuggestions(document.getElementById('quickFoodSearchInput').value || '');
+        }
       }
       if (
         data.type === 'meals_updated' ||
@@ -414,10 +421,23 @@ function renderDailyView() {
 
   container.querySelectorAll('[data-del-id]').forEach(btn => {
     btn.addEventListener('click', async () => {
+      if (!confirm('이 음식 기록을 삭제할까요?')) return;
       const id = btn.dataset.delId;
-      await fetch(`/api/meals/${id}`, { method: 'DELETE' });
-      showToast('식단 항목이 삭제되었습니다.');
-      await loadDailyData(state.selectedDate);
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/meals/${id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          showToast(err.error || '삭제 중 오류가 발생했습니다.');
+          return;
+        }
+        showToast('식단 항목이 삭제되었습니다.');
+        await loadDailyData(state.selectedDate);
+      } catch (err) {
+        showToast('네트워크 오류: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
     });
   });
 
@@ -494,6 +514,10 @@ async function saveEditedMeal() {
   const id = Number(document.getElementById('editMealId').value);
   if (!id) return;
 
+  const btn = document.getElementById('saveEditMealBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+
   const payload = {
     date: document.getElementById('editMealDate').value || state.selectedDate,
     meal_type: document.getElementById('editMealType').value || 'lunch',
@@ -507,23 +531,34 @@ async function saveEditedMeal() {
     image_data: editingMealImageBase64
   };
 
-  await fetch(`/api/meals/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-
-  if (document.getElementById('editAlsoUpdateFavCheck').checked) {
-    await fetch('/api/my-foods', {
-      method: 'POST',
+  try {
+    const res = await fetch(`/api/meals/${id}`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: [payload] })
+      body: JSON.stringify(payload)
     });
-  }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || '수정 저장에 실패했습니다.');
+      return;
+    }
 
-  document.getElementById('editMealModalBackdrop').classList.add('hidden');
-  showToast('음식 정보 및 영양성분이 수정되었습니다!');
-  await refreshCurrentView();
+    if (document.getElementById('editAlsoUpdateFavCheck').checked) {
+      await fetch('/api/my-foods', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: [payload] })
+      });
+    }
+
+    document.getElementById('editMealModalBackdrop').classList.add('hidden');
+    showToast('음식 정보 및 영양성분이 수정되었습니다!');
+    await refreshCurrentView();
+  } catch (err) {
+    showToast('네트워크 오류: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ============================================================================
@@ -659,7 +694,7 @@ function renderYearlyView() {
     const heightPct = m.avgCalories > 0 ? Math.max(8, Math.round((m.avgCalories / maxCal) * 100)) : 3;
     return `
       <div class="year-bar-col" data-goto-month="${m.month}" title="${m.month}월 일평균 ${m.avgCalories} kcal">
-        <span class="year-bar-val">${m.avgCalories > 0 ? m.avgCalories : ''}</span>
+        <span class="year-bar-val">${m.avgCalories > 0 ? m.avgCalories.toLocaleString() : ''}</span>
         <div class="year-bar-Stick" style="height:${heightPct}%"></div>
         <span class="year-bar-label">${m.month}월</span>
       </div>
@@ -724,11 +759,12 @@ async function openMealModal({ mealType = 'lunch', mode = 'text', autoStartCamer
 
   setModalMode(mode);
   document.getElementById('mealModalBackdrop').classList.remove('hidden');
-  await loadFoodSuggestions('');
+  document.getElementById('quickFoodSearchInput').value = '';
 
   if (autoStartCamera) {
     startLiveCamera();
   }
+  loadFoodSuggestions('');
 }
 
 function closeMealModal() {
@@ -746,18 +782,17 @@ function setModalMode(mode) {
   const promptLabel = document.getElementById('aiPromptLabel');
   const promptInput = document.getElementById('aiPromptInput');
   const favCheck = document.getElementById('alsoSaveToMyFoodsCheck');
+  if (favCheck) favCheck.checked = (mode === 'nutrition_label');
 
   if (mode === 'text') {
     stopLiveCamera();
     imgZone.classList.add('hidden');
     promptLabel.textContent = '먹은 음식 입력 (쉼표나 줄바꿈으로 구분해 적어보세요)';
     promptInput.placeholder = '예: 잡곡밥 1공기, 된장찌개 1인분, 고등어구이 1토막, 아이스 아메리카노 1잔';
-    if (favCheck) favCheck.checked = false;
   } else if (mode === 'nutrition_label') {
     imgZone.classList.remove('hidden');
     promptLabel.textContent = '🏷️ 제품 이름 입력 (예: 햇반, 하림 닭가슴살, 더단백 등 · 비워두어도 됩니다)';
     promptInput.placeholder = '예: 햇반 210g / 한끼통살 닭가슴살 (뒷면 영양정보 표를 가까이 선명하게 찍어주세요!)';
-    if (favCheck) favCheck.checked = true;
   } else if (mode === 'photo') {
     imgZone.classList.remove('hidden');
     promptLabel.textContent = '음식 사진 보충 메모 (선택사항)';
@@ -1007,6 +1042,10 @@ async function saveSelectedMultiSlots() {
     return;
   }
 
+  const btn = document.getElementById('saveMultiSlotsBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+
   const batchItems = [];
   checks.forEach(ch => {
     const slot = state.detectedSlots[Number(ch.dataset.slotIdx)];
@@ -1029,15 +1068,26 @@ async function saveSelectedMultiSlots() {
     }
   });
 
-  await fetch('/api/meals', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items: batchItems })
-  });
+  try {
+    const res = await fetch('/api/meals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: batchItems })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || '식단표 저장 중 오류가 발생했습니다.');
+      return;
+    }
 
-  closeMealModal();
-  showToast(`식단표에서 선택한 ${checks.length}개 끼니(${batchItems.length}개 메뉴)가 일괄 저장되었습니다!`);
-  await refreshCurrentView();
+    closeMealModal();
+    showToast(`식단표에서 선택한 ${checks.length}개 끼니(${batchItems.length}개 메뉴)가 일괄 저장되었습니다!`);
+    await refreshCurrentView();
+  } catch (err) {
+    showToast('네트워크 오류: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function renderStagedItems() {
@@ -1057,7 +1107,7 @@ function renderStagedItems() {
   }
 
   listEl.innerHTML = state.stagedItems.map((it, idx) => {
-    const thumbSrc = it.image_data || state.uploadedThumbBase64 || '';
+    const thumbSrc = it.image_data || '';
     const thumbHtml = thumbSrc
       ? `<img src="${thumbSrc}" alt="사진" title="클릭하면 사진을 크게 봅니다" />`
       : `<span title="사진 없음">🍽️</span>`;
@@ -1162,7 +1212,7 @@ async function loadFoodSuggestions(query) {
           protein: item.protein,
           fat: item.fat,
           sugar: item.sugar || 0,
-          image_data: item.image_data || state.uploadedThumbBase64 || null,
+          image_data: item.image_data || null,
           ai_note: item.source === 'favorite' ? '⭐ 내 빠른 음식' : (item.source === 'recent' ? '내가 자주 먹은 메뉴' : '한국음식 영양DB')
         });
         renderStagedItems();
@@ -1182,81 +1232,114 @@ async function loadFoodSuggestions(query) {
 }
 
 async function saveStagedToMyFoodsOnly() {
-  const promptText = document.getElementById('aiPromptInput').value.trim();
-  if (state.stagedItems.length === 0 && (promptText || state.uploadedImageBase64)) {
-    await runAiAnalyze();
-    if (state.stagedItems.length === 0) return;
-  }
+  const btn = document.getElementById('saveOnlyToMyFoodsBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
 
-  if (state.stagedItems.length === 0) {
-    showToast('먼저 성분표를 촬영하거나 음식을 추가해 주세요.');
-    return;
-  }
+  try {
+    const promptText = document.getElementById('aiPromptInput').value.trim();
+    if (state.stagedItems.length === 0 && (promptText || state.uploadedImageBase64)) {
+      await runAiAnalyze();
+      if (state.stagedItems.length === 0) return;
+    }
 
-  await fetch('/api/my-foods', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      items: state.stagedItems.map(it => ({
-        ...it,
-        image_data: state.uploadedThumbBase64 || null
-      }))
-    })
-  });
+    if (state.stagedItems.length === 0) {
+      showToast('먼저 성분표를 촬영하거나 음식을 추가해 주세요.');
+      return;
+    }
 
-  showToast(`⭐ ${state.stagedItems.length}개 식품이 [빠른 음식 클릭 추가]에 영구 등록되었습니다!`);
-  await loadFoodSuggestions(document.getElementById('quickFoodSearchInput').value);
-}
-
-async function saveStagedMeals() {
-  // 만약 stagedItems가 비어있는데 텍스트 입력창에 글자가 있다면 자동으로 먼저 계산 후 저장!
-  const promptText = document.getElementById('aiPromptInput').value.trim();
-  if (state.stagedItems.length === 0 && (promptText || state.uploadedImageBase64)) {
-    await runAiAnalyze();
-    if (state.stagedItems.length === 0) return;
-  }
-
-  if (state.stagedItems.length === 0) {
-    showToast('등록할 음식이 없습니다. 음식을 입력하거나 추가해주세요.');
-    return;
-  }
-
-  // '빠른 음식(즐겨찾기)에도 영구 저장' 체크박스가 켜져 있으면 my_foods에도 함께 저장
-  const alsoSaveFav = document.getElementById('alsoSaveToMyFoodsCheck')?.checked;
-  if (alsoSaveFav) {
-    await fetch('/api/my-foods', {
+    const res = await fetch('/api/my-foods', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         items: state.stagedItems.map(it => ({
           ...it,
-          image_data: state.uploadedThumbBase64 || null
+          image_data: it.image_data || null
         }))
       })
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || '빠른 음식 저장 중 오류가 발생했습니다.');
+      return;
+    }
+
+    showToast(`⭐ ${state.stagedItems.length}개 식품이 [빠른 음식 클릭 추가]에 영구 등록되었습니다!`);
+    await loadFoodSuggestions(document.getElementById('quickFoodSearchInput').value);
+  } catch (err) {
+    showToast('네트워크 오류: ' + err.message);
+  } finally {
+    btn.disabled = false;
   }
+}
 
-  const date = document.getElementById('modalDateInput').value || state.selectedDate;
-  const meal_type = document.getElementById('modalMealTypeSelect').value || 'lunch';
+async function saveStagedMeals() {
+  const btn = document.getElementById('saveStagedMealsBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
 
-  await fetch('/api/meals', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      date,
-      meal_type,
-      source_type: state.modalMode,
-      image_data: state.uploadedThumbBase64 || null,
-      items: state.stagedItems
-    })
-  });
+  try {
+    // 만약 stagedItems가 비어있는데 텍스트 입력창에 글자가 있다면 자동으로 먼저 계산 후 저장!
+    const promptText = document.getElementById('aiPromptInput').value.trim();
+    if (state.stagedItems.length === 0 && (promptText || state.uploadedImageBase64)) {
+      await runAiAnalyze();
+      if (state.stagedItems.length === 0) return;
+    }
 
-  closeMealModal();
-  state.selectedDate = date;
-  showToast(alsoSaveFav
-    ? '식단표 및 ⭐빠른 음식 즐겨찾기에 모두 저장되었습니다!'
-    : '식단이 저장되어 모든 기기에 동기화되었습니다!');
-  await refreshCurrentView();
+    if (state.stagedItems.length === 0) {
+      showToast('등록할 음식이 없습니다. 음식을 입력하거나 추가해주세요.');
+      return;
+    }
+
+    // '빠른 음식(즐겨찾기)에도 영구 저장' 체크박스가 켜져 있으면 my_foods에도 함께 저장
+    const alsoSaveFav = document.getElementById('alsoSaveToMyFoodsCheck')?.checked;
+    if (alsoSaveFav) {
+      const favRes = await fetch('/api/my-foods', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: state.stagedItems.map(it => ({
+            ...it,
+            image_data: it.image_data || null
+          }))
+        })
+      });
+      if (!favRes.ok) {
+        const err = await favRes.json().catch(() => ({}));
+        showToast(err.error || '빠른 음식 즐겨찾기 저장 중 오류가 발생했습니다.');
+      }
+    }
+
+    const date = document.getElementById('modalDateInput').value || state.selectedDate;
+    const meal_type = document.getElementById('modalMealTypeSelect').value || 'lunch';
+
+    const res = await fetch('/api/meals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        date,
+        meal_type,
+        source_type: state.modalMode,
+        items: state.stagedItems
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || '식단 저장 중 오류가 발생했습니다.');
+      return;
+    }
+
+    closeMealModal();
+    state.selectedDate = date;
+    showToast(alsoSaveFav
+      ? '식단표 및 ⭐빠른 음식 즐겨찾기에 모두 저장되었습니다!'
+      : '식단이 저장되어 모든 기기에 동기화되었습니다!');
+    await refreshCurrentView();
+  } catch (err) {
+    showToast('네트워크 오류: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ============================================================================
@@ -1267,12 +1350,15 @@ async function openSettingsModal() {
   const s = state.settings;
 
   const badge = document.getElementById('geminiKeyStatusBadge');
+  const clearKeyBtn = document.getElementById('clearGeminiKeyBtn');
   if (s.has_gemini_key) {
     badge.textContent = `연결됨 (${s.gemini_key_preview})`;
     badge.classList.add('ok');
+    if (clearKeyBtn) clearKeyBtn.classList.remove('hidden');
   } else {
-    badge.textContent = '미설정 (내장 DB 모드)';
+    badge.textContent = '미설정 (내 PC 로컬 분석 모드)';
     badge.classList.remove('ok');
+    if (clearKeyBtn) clearKeyBtn.classList.add('hidden');
   }
 
   document.getElementById('settingGeminiKey').value = '';
@@ -1282,12 +1368,17 @@ async function openSettingsModal() {
   document.getElementById('settingTargetCarbs').value = s.target_carbs;
   document.getElementById('settingTargetProtein').value = s.target_protein;
   document.getElementById('settingTargetFat').value = s.target_fat;
+  document.getElementById('settingTargetSugar').value = s.target_sugar;
   document.getElementById('settingTargetWater').value = s.target_water;
 
   document.getElementById('settingsModalBackdrop').classList.remove('hidden');
 }
 
 async function saveSettings() {
+  const btn = document.getElementById('saveSettingsBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+
   const payload = {
     gemini_api_key: document.getElementById('settingGeminiKey').value.trim(),
     gemini_model: document.getElementById('settingGeminiModel').value,
@@ -1296,19 +1387,31 @@ async function saveSettings() {
     target_carbs: Number(document.getElementById('settingTargetCarbs').value) || 250,
     target_protein: Number(document.getElementById('settingTargetProtein').value) || 100,
     target_fat: Number(document.getElementById('settingTargetFat').value) || 65,
+    target_sugar: Math.max(0, Number(document.getElementById('settingTargetSugar').value) || 50),
     target_water: Number(document.getElementById('settingTargetWater').value) || 2000
   };
 
-  await fetch('/api/settings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || '설정 저장에 실패했습니다.');
+      return;
+    }
 
-  document.getElementById('settingsModalBackdrop').classList.add('hidden');
-  await loadSettings();
-  await refreshCurrentView();
-  showToast('설정이 저장되었습니다!');
+    document.getElementById('settingsModalBackdrop').classList.add('hidden');
+    await loadSettings();
+    await refreshCurrentView();
+    showToast('설정이 저장되었습니다!');
+  } catch (err) {
+    showToast('네트워크 오류: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ============================================================================
@@ -1359,16 +1462,16 @@ function bindEvents() {
   document.getElementById('waterPlus500Btn').addEventListener('click', () => updateDailyLog({ water_delta: 500 }));
   document.getElementById('waterMinusBtn').addEventListener('click', () => updateDailyLog({ water_delta: -250 }));
 
-  document.getElementById('saveWeightBtn').addEventListener('click', () => {
+  document.getElementById('saveWeightBtn').addEventListener('click', async () => {
     const w = document.getElementById('dailyWeightInput').value;
-    updateDailyLog({ weight: w });
-    showToast('오늘 체중이 기록되었습니다.');
+    const ok = await updateDailyLog({ weight: w });
+    if (ok) showToast('오늘 체중이 기록되었습니다.');
   });
 
-  document.getElementById('saveMemoBtn').addEventListener('click', () => {
+  document.getElementById('saveMemoBtn').addEventListener('click', async () => {
     const memo = document.getElementById('dailyMemoInput').value;
-    updateDailyLog({ memo });
-    showToast('오늘 메모가 저장되었습니다.');
+    const ok = await updateDailyLog({ memo });
+    if (ok) showToast('오늘 메모가 저장되었습니다.');
   });
 
   // AI 배너 버튼 & 모바일 중앙 + 버튼
@@ -1422,8 +1525,13 @@ function bindEvents() {
   document.getElementById('runAiAnalyzeBtn').addEventListener('click', runAiAnalyze);
   document.getElementById('saveMultiSlotsBtn').addEventListener('click', saveSelectedMultiSlots);
 
+  let quickFoodSearchTimer = null;
   document.getElementById('quickFoodSearchInput').addEventListener('input', (e) => {
-    loadFoodSuggestions(e.target.value);
+    const q = e.target.value;
+    clearTimeout(quickFoodSearchTimer);
+    quickFoodSearchTimer = setTimeout(() => {
+      loadFoodSuggestions(q);
+    }, 220);
   });
 
   document.getElementById('addBlankRowBtn').addEventListener('click', () => {
@@ -1435,7 +1543,7 @@ function bindEvents() {
       protein: 0,
       fat: 0,
       sugar: 0,
-      image_data: state.uploadedThumbBase64 || null
+      image_data: null
     });
     renderStagedItems();
   });
@@ -1473,6 +1581,7 @@ function bindEvents() {
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   });
 
   document.getElementById('removeEditMealPhotoBtn').addEventListener('click', () => {
@@ -1499,6 +1608,18 @@ function bindEvents() {
     document.getElementById('settingsModalBackdrop').classList.add('hidden');
   });
   document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+  document.getElementById('clearGeminiKeyBtn')?.addEventListener('click', async () => {
+    if (!confirm('저장된 Gemini API 키를 삭제하고 내 PC 로컬 분석 모드로 전환할까요?')) return;
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gemini_api_key: '__CLEAR__' })
+    });
+    if (res.ok) {
+      await openSettingsModal();
+      showToast('Gemini API 키가 삭제되었습니다.');
+    }
+  });
 
   document.getElementById('openSyncGuideBtn').addEventListener('click', () => {
     loadServerInfo();
@@ -1538,13 +1659,16 @@ function bindEvents() {
       });
       const result = await res.json();
       if (res.ok) {
-        showToast(`복원 완료! (식단 ${result.importedMeals}건)`);
+        const favMsg = result.importedMyFoods ? `, 빠른음식 ${result.importedMyFoods}건` : '';
+        showToast(`복원 완료! (식단 ${result.importedMeals}건${favMsg})`);
         await refreshCurrentView();
       } else {
         showToast(result.error || '복원 실패');
       }
     } catch (err) {
       showToast('올바른 JSON 백업 파일이 아닙니다.');
+    } finally {
+      e.target.value = '';
     }
   });
 }
@@ -1580,15 +1704,26 @@ function shiftMonth(monthDelta) {
 }
 
 async function updateDailyLog(payload) {
-  await fetch('/api/daily-log', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      date: state.selectedDate,
-      ...payload
-    })
-  });
-  await loadDailyData(state.selectedDate);
+  try {
+    const res = await fetch('/api/daily-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        date: state.selectedDate,
+        ...payload
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || '저장 중 오류가 발생했습니다.');
+      return false;
+    }
+    await loadDailyData(state.selectedDate);
+    return true;
+  } catch (err) {
+    showToast('네트워크 오류: ' + err.message);
+    return false;
+  }
 }
 
 function escapeHtml(str) {

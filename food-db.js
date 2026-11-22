@@ -121,7 +121,7 @@ function estimateFromTextFallback(inputText) {
   const items = [];
   for (const part of rawParts) {
     const cleanedName = part
-      .replace(/(\d+(?:\.\d+)?)\s*(인분|공기|그릇|개|줄|잔|팩|봉|봉지|캔|컵|쪽|토막|조각|병|g|ml)/gi, '')
+      .replace(/(\d+(?:\.\d+)?)\s*(인분|공기|그릇|개|줄|잔|팩|봉지|봉|캔|컵|쪽|토막|조각|병|그램|그람|밀리리터|밀리|ml|g)/gi, '')
       .replace(/반\s*(공기|그릇|개|줄|인분|쪽)/g, '')
       .trim() || part;
 
@@ -139,7 +139,7 @@ function estimateFromTextFallback(inputText) {
       }
     }
 
-    // 수량/배수 파싱 (해당 음식의 기본 g/ml 중량 대비 정확한 비율 계산)
+    // 수량/배수 파싱 (해당 음식의 기본 g/ml/개수 중량 대비 정확한 비율 계산)
     let multiplier = 1;
     let amountNote = '';
     if (/반\s*(공기|그릇|개|줄|인분|쪽)/.test(part) || /1\/2/.test(part)) {
@@ -152,23 +152,34 @@ function estimateFromTextFallback(inputText) {
       multiplier = 3;
       amountNote = '3개/3인분';
     } else {
-      const numMatch = part.match(/(\d+(?:\.\d+)?)\s*(인분|공기|그릇|개|줄|잔|팩|봉|봉지|캔|컵|쪽|토막|조각|병|g|ml)/i);
+      const numMatch = part.match(/(\d+(?:\.\d+)?)\s*(인분|공기|그릇|개|줄|잔|팩|봉지|봉|캔|컵|쪽|토막|조각|병|그램|그람|밀리리터|밀리|ml|g)/i);
       if (numMatch) {
         const val = parseFloat(numMatch[1]);
-        const unit = numMatch[2].toLowerCase();
-        if (unit === 'g') {
+        const rawUnit = numMatch[2].toLowerCase();
+        if (rawUnit === 'g' || rawUnit === '그램' || rawUnit === '그람') {
           const baseGMatch = matched?.unit?.match(/(\d+)\s*g/i);
           const baseG = baseGMatch ? parseFloat(baseGMatch[1]) : 150;
           multiplier = Math.max(0.1, Math.min(8, val / baseG));
           amountNote = `${val}g`;
-        } else if (unit === 'ml') {
+        } else if (rawUnit === 'ml' || rawUnit === '밀리리터' || rawUnit === '밀리') {
           const baseMlMatch = matched?.unit?.match(/(\d+)\s*ml/i);
           const baseMl = baseMlMatch ? parseFloat(baseMlMatch[1]) : 355;
           multiplier = Math.max(0.1, Math.min(8, val / baseMl));
           amountNote = `${val}ml`;
-        } else if (unit === '조각') {
-          multiplier = Math.max(0.25, Math.min(4, val / 3));
-          amountNote = `${val}조각`;
+        } else if (rawUnit === '조각' || rawUnit === '쪽' || rawUnit === '개') {
+          const baseUnitStr = matched?.unit || '';
+          const rangeMatch = baseUnitStr.match(new RegExp(`(\\d+)~(\\d+)\\s*${rawUnit}`));
+          const singleMatch = baseUnitStr.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*${rawUnit}`));
+          let baseCount = 1;
+          if (rangeMatch) {
+            baseCount = (parseFloat(rangeMatch[1]) + parseFloat(rangeMatch[2])) / 2;
+          } else if (singleMatch) {
+            baseCount = parseFloat(singleMatch[1]);
+          } else if (rawUnit === '조각') {
+            baseCount = 3;
+          }
+          multiplier = Math.max(0.2, Math.min(10, val / baseCount));
+          amountNote = `${val}${numMatch[2]}`;
         } else {
           multiplier = Math.max(0.2, Math.min(10, val));
           amountNote = `${val}${numMatch[2]}`;

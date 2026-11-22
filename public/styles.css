@@ -574,7 +574,12 @@ button, input, select, textarea {
   align-items: center;
   justify-content: center;
   gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: transform 0.1s, opacity 0.15s;
+}
+.btn-primary.hidden, .btn-accent.hidden, .btn-dark.hidden, .btn-secondary.hidden, .btn-outline.hidden {
+  display: none;
 }
 .btn-primary:active, .btn-accent:active, .btn-dark:active {
   transform: scale(0.98);
@@ -632,13 +637,14 @@ button, input, select, textarea {
 }
 
 .meal-slot-header {
-  padding: 15px 18px;
+  padding: 14px 16px;
   background: var(--surface-soft);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .meal-slot-title-group {
@@ -668,12 +674,14 @@ button, input, select, textarea {
 }
 
 .meal-slot-cal-badge {
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   font-weight: 800;
   color: var(--primary-dark);
   background: var(--primary-soft);
   padding: 4px 10px;
   border-radius: 99px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .meal-items-body {
@@ -1139,7 +1147,8 @@ button, input, select, textarea {
   background: var(--surface-soft);
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .form-row-2 {
@@ -1359,17 +1368,21 @@ button, input, select, textarea {
 .chips-header input {
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 4px 10px;
+  padding: 5px 10px;
   font-size: 0.8rem;
   background: var(--surface);
+  min-width: 220px;
+  flex: 1 1 200px;
+  max-width: 100%;
 }
 
 .food-chips-list {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  max-height: 82px;
+  max-height: 98px;
   overflow-y: auto;
+  padding-bottom: 2px;
 }
 
 .chips-title-group {
@@ -1558,7 +1571,7 @@ button, input, select, textarea {
   height: 100%;
   object-fit: cover;
 }
-.edit-photo-Preview-wrap img.hidden,
+.edit-photo-preview-wrap img.hidden,
 .edit-photo-empty.hidden {
   display: none;
 }
@@ -1815,7 +1828,21 @@ button, input, select, textarea {
     grid-template-columns: repeat(2, 1fr);
   }
   .staged-row {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .staged-row .staged-thumb-wrap {
+    grid-column: 1;
+    justify-self: start;
+  }
+  .staged-row .staged-field:nth-of-type(2) {
+    grid-column: 2 / -1;
+  }
+  .staged-row .mini-action-btn {
+    grid-column: 1 / -1;
+    justify-self: end;
+    background: var(--danger-soft);
+    color: var(--danger);
+    padding: 4px 10px;
   }
   .mobile-bottom-nav {
     position: fixed;
@@ -1893,5 +1920,29 @@ button, input, select, textarea {
     padding: 10px;
     flex-direction: row;
     gap: 6px;
+  }
+  .meal-item-row {
+    flex-wrap: wrap;
+  }
+  .meal-item-left {
+    flex: 1 1 200px;
+  }
+  .meal-item-right {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 6px;
+    border-top: 1px dashed var(--border);
+  }
+  .meal-slot-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .modal-footer {
+    justify-content: stretch;
+  }
+  .modal-footer button {
+    flex: 1 1 auto;
+    font-size: 0.82rem;
+    padding: 9px 10px;
   }
 }

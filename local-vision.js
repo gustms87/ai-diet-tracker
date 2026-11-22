@@ -39,7 +39,7 @@ function runWindowsNativeOcr(imgBuffer) {
     execFile(
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-ImagePath', tmpFile],
-      { timeout: 12000, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' },
+      { timeout: 20000, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' },
       (err, stdout) => {
         try { fs.unlinkSync(tmpFile); } catch (_) {}
         if (err || !stdout) return resolve(null);
@@ -75,6 +75,24 @@ function parseGramToken(rawToken, nextToken = '', maxVal = 250) {
     .replace(/,/g, '')
     .replace(/^[(:]+|[):]+$/g, '')
     .trim();
+
+  // 0) Windows OCR에서 그램과 퍼센트가 붙어버린 특수 토큰 복원 (예: "0g0%", "70g22%", "090%", "1.593%")
+  const gluedExplicitG = cleaned.match(/^(\d{1,3}(?:\.\d+)?)\s*[gGｇqQ]\d{1,3}%$/);
+  if (gluedExplicitG) {
+    const v = parseFloat(gluedExplicitG[1]);
+    return v >= 0 && v <= maxVal ? Math.round(v * 10) / 10 : null;
+  }
+  const gluedNinePct = cleaned.match(/^(0|\d{1,3}\.\d)9\d{1,3}%$/);
+  if (gluedNinePct) {
+    const v = parseFloat(gluedNinePct[1]);
+    return v >= 0 && v <= maxVal ? Math.round(v * 10) / 10 : null;
+  }
+  // 4자리 이상 붙은 "<그램>9<퍼센트>%" 토큰 복원 (예: "19935%" = 19g 35%, "70922%" = 70g 22%, "6911%" = 6g 11%)
+  const gluedMultiNinePct = cleaned.match(/^(\d{1,3})9(\d{1,2})%$/);
+  if (gluedMultiNinePct && (gluedMultiNinePct[1].length + 1 + gluedMultiNinePct[2].length) >= 4) {
+    const v = parseFloat(gluedMultiNinePct[1]);
+    return v >= 0 && v <= maxVal ? v : null;
+  }
 
   // 퍼센트(%), mg, kcal, ml 토큰은 그램(g)이 아니므로 제외
   if (/%|mg|㎎|kcal|㎉|ml|mL/i.test(cleaned)) return null;
@@ -143,8 +161,8 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
   // "2,000 kcal 기준" 문구만 안전하게 제거 (실제 열량이 같은 줄에 있어도 보존되도록 정확히 해당 구문만 치환)
   const textWithout2000Ref = combinedText
     .replace(/,/g, '')
-    .replace(/2\s*0\s*0\s*0\s*(?:kcal|㎉|kca1|kcaI|칼로리)\s*기\s*준/gi, ' ')
-    .replace(/기준치[가-힣\s()*%0-9]{0,20}2000\s*(?:kcal|㎉)/gi, ' ');
+    .replace(/2\s*0\s*0\s*0\s*(?:kcal|㎉|keal|kca1|kcaI|kcai|칼로리)\s*기\s*준/gi, ' ')
+    .replace(/기준치[가-힣\s()*%0-9]{0,20}2000\s*(?:kcal|㎉|keal)/gi, ' ');
 
   // --------------------------------------------------------------------------
   // 1. 칼로리(kcal / 열량) 추출
@@ -153,7 +171,7 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
   const calCandidates = [];
 
   const calRegexes = [
-    /(\d{1,4}(?:\.\d+)?)\s*(?:kcal|㎉|kca1|kcaI|kcai|KCAL|칼로리)/gi,
+    /(\d{1,4}(?:\.\d+)?)\s*(?:kcal|㎉|keal|kca1|kcaI|kcai|KCAL|칼로리)/gi,
     /열\s*량\s*[:.]?\s*(\d{1,4}(?:\.\d+)?)/gi,
     /칼\s*로\s*리\s*[:.]?\s*(\d{1,4}(?:\.\d+)?)/gi
   ];
@@ -162,13 +180,23 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
     const matches = [...textWithout2000Ref.matchAll(rx)];
     for (const m of matches) {
       const val = parseFloat(m[1]);
-      if (val >= 5 && val !== 2000 && val <= 3000) {
+      if (!isNaN(val) && val >= 0 && val !== 2000 && val <= 3000) {
         calCandidates.push(Math.round(val));
       }
     }
   }
   if (calCandidates.length > 0) {
     calories = calCandidates[0];
+  }
+
+  // 포화지방·트랜스지방·불포화지방 등 제외 대상 항목만 정확히 제거 (같은 줄의 실제 '지방' 보존)
+  function stripExcludedNutrients(text, excludeRegex) {
+    if (!excludeRegex) return text;
+    const rx = new RegExp(
+      `(?:${excludeRegex.source})\\s*(?:지\\s*방|Fat)?\\s*[:.]?\\s*(?:(?:[oO][gG]|\\d{1,3}(?:\\.\\d+)?)\\s*(?:%|g|G|ｇ|9|q|Q|mg|㎎)?\\s*){0,2}`,
+      'gi'
+    );
+    return text.replace(rx, ' ');
   }
 
   // --------------------------------------------------------------------------
@@ -179,12 +207,9 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
   // --------------------------------------------------------------------------
   function findNutrientByKeyword(keywordRegex, excludeRegex = null, maxVal = 250) {
     // (A) 먼저 Tesseract 텍스트(영어 'g' 인식 정확도 높음)에서 명시적 '<숫자>g' 탐색
-    let tessTarget = (tesseractText || '').replace(/,/g, '');
-    if (excludeRegex) {
-      tessTarget = tessTarget.replace(new RegExp(excludeRegex.source + '[^\\n]{0,18}', 'gi'), ' ');
-    }
+    const tessTarget = stripExcludedNutrients((tesseractText || '').replace(/,/g, ''), excludeRegex);
     const explicitTessRx = new RegExp(
-      keywordRegex.source + '[^\\d\\n]{0,15}(?:\\d{1,3}\\s*%\\s*)?(\\d{1,3}(?:\\.\\d+)?)\\s*[gGｇ]',
+      `(?:${keywordRegex.source})[^\\d\\n]{0,15}(?:\\d{1,3}\\s*%\\s*)?(\\d{1,3}(?:\\.\\d+)?)\\s*[gGｇ](?!\\s*%)`,
       'i'
     );
     const tessMatch = tessTarget.match(explicitTessRx);
@@ -202,10 +227,16 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
 
       for (let wi = 0; wi < words.length; wi++) {
         const wText = words[wi].text || '';
-        const twoWord = wi + 1 < words.length ? wText + words[wi + 1].text : wText;
+        const prevWord = wi > 0 ? (words[wi - 1].text || '') : '';
+        const nextWord = wi + 1 < words.length ? (words[wi + 1].text || '') : '';
+        const twoWord = nextWord ? wText + nextWord : wText;
 
-        const matchedSingle = keywordRegex.test(wText) && (!excludeRegex || !excludeRegex.test(wText));
-        const matchedTwo = !matchedSingle && keywordRegex.test(twoWord) && (!excludeRegex || !excludeRegex.test(twoWord));
+        const isExcludedSingle = excludeRegex && (excludeRegex.test(wText) || excludeRegex.test(prevWord) || excludeRegex.test(prevWord + wText));
+        const matchedSingle = keywordRegex.test(wText) && !isExcludedSingle;
+
+        // 두 단어 합치기는 숫자가 없고 다음 단어 단독으로는 키워드가 아닐 때만 허용 (예: "탄수" + "화물", "8g" + "단백질" 방지!)
+        const isExcludedTwo = excludeRegex && (excludeRegex.test(twoWord) || excludeRegex.test(prevWord) || excludeRegex.test(prevWord + twoWord));
+        const matchedTwo = !matchedSingle && Boolean(nextWord) && !/\d/.test(wText) && !keywordRegex.test(nextWord) && keywordRegex.test(twoWord) && !isExcludedTwo;
 
         if (matchedSingle || matchedTwo) {
           const kwX = words[wi].x;
@@ -224,7 +255,7 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
           for (let k = startIdx; k < Math.min(words.length, startIdx + 5); k++) {
             const candidate = words[k].text;
             const nextToken = words[k + 1]?.text || '';
-            if (/탄수|단백|지방|당류|나트륨|콜레스|열량|칼로리/.test(candidate)) break;
+            if (/탄수|단백|지방|당류|나트륨|콜레스|열량|칼로리|포화|트랜스/.test(candidate)) break;
             const parsed = parseGramToken(candidate, nextToken, maxVal);
             if (parsed !== null) return parsed;
           }
@@ -251,13 +282,10 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
       }
     }
 
-    // (C) 전체 합산 텍스트 정규식 탐색
-    let targetText = combinedText.replace(/,/g, '');
-    if (excludeRegex) {
-      targetText = targetText.replace(new RegExp(excludeRegex.source + '[^\\d\\n]{0,15}\\d+(?:\\.\\d+)?[g9%]?', 'gi'), ' ');
-    }
+    // (C) 전체 합산 텍스트 정규식 탐색 (% 수치는 절대 g으로 오인하지 않도록 negative lookahead 적용)
+    const targetText = stripExcludedNutrients(combinedText.replace(/,/g, ''), excludeRegex);
     const pattern = new RegExp(
-      keywordRegex.source + '[^\\d\\n]{0,15}(?:\\d{1,3}\\s*%\\s*)?(\\d{1,3}(?:\\.\\d+)?\\s*[gG9qQ]?)',
+      `(?:${keywordRegex.source})[^\\d\\n]{0,15}(?:\\d{1,3}\\s*%\\s*)?(\\d{1,3}(?:\\.\\d+)?(?:\\s*[gGｇqQ]|9)?)(?!\\s*%|\\d)`,
       'i'
     );
     const m = targetText.match(pattern);
@@ -282,22 +310,18 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
   let amount = null;
   const flatNoComma = combinedText.replace(/,/g, '');
   const weightPatterns = [
-    /(?:총\s*내\s*용\s*량|내\s*용\s*량|제\s*공\s*량)[^\d\n]{0,12}(\d{2,4})\s*(?:[gG9]|ml|mL)/i,
-    /(\d{2,4})\s*(?:[gG9]|ml|mL)\s*\(\s*\d{2,4}\s*(?:kcal|㎉)/i,
-    /(\d{2,4}\s*(?:g|ml|mL))\b/i
+    /(?:총\s*내\s*용\s*량|내\s*용\s*량|제\s*공\s*량)[^\d\n]{0,12}(\d{2,4})\s*(ml|mL|[gG9])/i,
+    /(\d{2,4})\s*(ml|mL|[gG9])\s*\(\s*\d{1,4}\s*(?:kcal|㎉|keal)/i,
+    /(?<!(?:탄수화물|단백질|지방|당류|포화지방|트랜스지방)\s{0,3})(\d{2,4})\s*(ml|mL|g)\b/i
   ];
   for (const wp of weightPatterns) {
     const wm = flatNoComma.match(wp);
     if (wm && wm[1]) {
-      const rawW = wm[1].replace(/\s+/g, '');
-      if (/^\d+$/.test(rawW)) {
-        const numW = parseInt(rawW, 10);
-        if (numW >= 25 && numW <= 1500 && numW !== calories) {
-          amount = `1개(${numW}g)`;
-          break;
-        }
-      } else {
-        amount = `1개(${rawW})`;
+      const numW = parseInt(wm[1], 10);
+      const rawUnit = (wm[2] || 'g').toLowerCase();
+      const unit = rawUnit === 'ml' ? 'ml' : 'g';
+      if (numW >= 15 && numW <= 2000 && (unit === 'ml' || numW !== calories)) {
+        amount = `1개(${numW}${unit})`;
         break;
       }
     }
@@ -316,9 +340,12 @@ function extractNutritionFromOcrData(winOcrData, tesseractText, userMemo = '') {
   // --------------------------------------------------------------------------
   let foodName = (userMemo || '').trim();
   if (!foodName && lines.length > 0) {
-    const ignoreLineRx = /영양정보|영양성분|내용량|탄수화물|단백질|포화지방|트랜스지방|콜레스테롤|나트륨|기준치|kcal|%|원재료|보관방법|소비기한|유통기한|비율/i;
+    const ignoreLineRx = /영양정보|영양성분|내용량|탄수화물|단백질|포화지방|트랜스지방|콜레스테롤|나트륨|나트름|기준치|kcal|keal|%|원재료|보관방법|소비기한|유통기한|비율/i;
     for (const l of lines) {
-      const txt = (l.text || '').trim().replace(/닭가습살/g, '닭가슴살');
+      const txt = (l.text || '')
+        .trim()
+        .replace(/닭가습살/g, '닭가슴살')
+        .replace(/코카클라/g, '코카콜라');
       if (txt.length >= 2 && txt.length <= 28 && /[가-힣]/.test(txt) && !ignoreLineRx.test(txt)) {
         foodName = txt;
         break;

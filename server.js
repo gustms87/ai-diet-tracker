@@ -202,7 +202,13 @@ function parseCookies(req) {
   for (const part of header.split(';')) {
     const idx = part.indexOf('=');
     if (idx > -1) {
-      out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+      const k = part.slice(0, idx).trim();
+      const rawV = part.slice(idx + 1).trim();
+      try {
+        out[k] = decodeURIComponent(rawV);
+      } catch (_) {
+        out[k] = rawV;
+      }
     }
   }
   return out;
@@ -712,6 +718,9 @@ app.post('/api/meals', async (req, res) => {
 
 app.put('/api/meals/:id', async (req, res) => {
   const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: '올바른 식단 ID가 아닙니다.' });
+  }
   const existing = await dbGet('SELECT * FROM meals WHERE id = ?', [id]);
   if (!existing) {
     return res.status(404).json({ error: '식단 항목을 찾을 수 없습니다.' });
@@ -754,6 +763,9 @@ app.put('/api/meals/:id', async (req, res) => {
 
 app.delete('/api/meals/:id', async (req, res) => {
   const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: '올바른 식단 ID가 아닙니다.' });
+  }
   const existing = await dbGet('SELECT date FROM meals WHERE id = ?', [id]);
   await dbRun('DELETE FROM meals WHERE id = ?', [id]);
   if (existing) {
@@ -780,7 +792,15 @@ app.post('/api/daily-log', async (req, res) => {
 
   let nextWeight = current.weight;
   if (weight !== undefined) {
-    nextWeight = weight === '' || weight === null ? null : Number(weight);
+    if (weight === '' || weight === null) {
+      nextWeight = null;
+    } else {
+      const parsedWeight = Number(weight);
+      if (!Number.isFinite(parsedWeight) || parsedWeight <= 0 || parsedWeight > 500) {
+        return res.status(400).json({ error: '올바른 체중(kg) 숫자를 입력해 주세요.' });
+      }
+      nextWeight = Math.round(parsedWeight * 10) / 10;
+    }
   }
 
   let nextWater = current.water_ml || 0;
@@ -869,6 +889,9 @@ app.post('/api/my-foods', async (req, res) => {
 
 app.delete('/api/my-foods/:id', async (req, res) => {
   const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: '올바른 즐겨찾기 ID가 아닙니다.' });
+  }
   await dbRun('DELETE FROM my_foods WHERE id = ?', [id]);
   broadcastSync('my_foods_updated');
   res.json({ ok: true });
@@ -1103,11 +1126,17 @@ app.post('/api/ai/analyze', async (req, res) => {
     }
   ]
 }`;
-          if (mode === 'photo') {
+          if (mode === 'nutrition_label') {
             parts.push({
               text: text
-                ? `이 음식 사진을 분석해 각 음식의 칼로리와 영양성분을 계산해 주세요. 사용자 메모: "${text}"`
-                : `이 음식 사진에 보이는 모든 음식/반찬/음료를 식별하고 1인분 섭취 기준 칼로리와 탄수화물, 단백질, 지방, 당류를 계산해 주세요.`
+                ? `이 영양성분표/포장지 사진에 인쇄된 실제 칼로리(kcal), 탄수화물(g), 단백질(g), 지방(g), 당류(g), 총 내용량을 최우선으로 정확히 그대로 읽어 적용해 주세요. 사용자 메모/제품명: "${text}"`
+                : `이 영양성분표/포장지 사진에 인쇄된 제품명, 총 내용량, 실제 칼로리(kcal), 탄수화물(g), 단백질(g), 지방(g), 당류(g)를 임의 추정하지 말고 표기된 수치 그대로 정확히 읽어 JSON으로 반환해 주세요.`
+            });
+          } else if (mode === 'photo') {
+            parts.push({
+              text: text
+                ? `이 음식 사진을 분석해 각 음식의 칼로리와 영양성분을 계산해 주세요. 사진 안에 영양성분/칼로리 표기가 보이면 표기 수치를 최우선 적용하세요. 사용자 메모: "${text}"`
+                : `이 음식 사진에 보이는 모든 음식/반찬/음료를 식별하고 1인분 섭취 기준 칼로리와 탄수화물, 단백질, 지방, 당류를 계산해 주세요. 사진 안에 칼로리/성분 표기가 있다면 그 수치를 최우선 적용하세요.`
             });
           } else {
             parts.push({
@@ -1182,20 +1211,22 @@ app.post('/api/ai/analyze', async (req, res) => {
 app.get('/api/backup/export', async (req, res) => {
   const meals = await dbAll('SELECT * FROM meals ORDER BY date ASC, id ASC');
   const dailyLogs = await dbAll('SELECT * FROM daily_logs ORDER BY date ASC');
+  const myFoods = await dbAll('SELECT * FROM my_foods ORDER BY id ASC');
   const settings = await getAllSettings();
   delete settings.gemini_api_key; // 보안상 API 키는 백업 파일에서 제외
 
   res.json({
-    version: '1.0',
+    version: '1.1',
     exportedAt: new Date().toISOString(),
     settings,
     meals,
-    dailyLogs
+    dailyLogs,
+    myFoods
   });
 });
 
 app.post('/api/backup/import', async (req, res) => {
-  const { meals = [], dailyLogs = [], settings = {} } = req.body || {};
+  const { meals = [], dailyLogs = [], myFoods = [], settings = {} } = req.body || {};
 
   const statements = [];
   for (const [k, v] of Object.entries(settings)) {
@@ -1242,11 +1273,34 @@ app.post('/api/backup/import', async (req, res) => {
     });
   }
 
+  for (const f of myFoods) {
+    const foodName = String(f.food_name || '').trim();
+    if (!foodName) continue;
+    statements.push({
+      sql: `DELETE FROM my_foods WHERE food_name = ?`,
+      args: [foodName]
+    });
+    statements.push({
+      sql: `INSERT INTO my_foods (food_name, amount, calories, carbs, protein, fat, sugar, image_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: cleanArgs([
+        foodName,
+        String(f.amount || '1개'),
+        Math.max(0, Number(f.calories) || 0),
+        Math.max(0, Number(f.carbs) || 0),
+        Math.max(0, Number(f.protein) || 0),
+        Math.max(0, Number(f.fat) || 0),
+        Math.max(0, Number(f.sugar) || 0),
+        f.image_data || null
+      ])
+    });
+  }
+
   try {
     // batch는 하나의 트랜잭션으로 실행되어 실패 시 전체 롤백됩니다.
     if (statements.length > 0) await db.batch(statements, 'write');
     broadcastSync('full_reload');
-    res.json({ ok: true, importedMeals: meals.length, importedLogs: dailyLogs.length });
+    res.json({ ok: true, importedMeals: meals.length, importedLogs: dailyLogs.length, importedMyFoods: myFoods.length });
   } catch (err) {
     res.status(500).json({ error: '데이터 복원 중 오류: ' + err.message });
   }
